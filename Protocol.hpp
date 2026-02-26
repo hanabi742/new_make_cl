@@ -35,7 +35,6 @@ namespace fs = std::filesystem;
 #define MAX_PACKET_SIZE (64 * 1024)
 #define STORAGE_ROOT "./storage"
 
-
 /* 5. 패킷 타입 정의 (enum 사용) */
 typedef enum
 {
@@ -50,12 +49,13 @@ typedef enum
     PKT_REQ_DOWNLOAD_START = 6, // 클라이언트 -> 서버 (다운로드 요청)
     PKT_RES_DOWNLOAD_START = 7, // 서버 -> 클라이언트 (파일 정보/크기 응답)
     PKT_RES_DOWNLOAD_DATA = 8,  // 서버 -> 클라이언트 (파일 데이터 전송)
-
-    // --- 인증 관련 (10~13) ---
-    PKT_REQ_REGISTER = 10, // 클라이언트 -> 서버 (회원가입 요청)
-    PKT_RES_REGISTER = 11, // 서버 -> 클라이언트 (가입 결과/PK 응답)
-    PKT_REQ_LOGIN = 12,    // 클라이언트 -> 서버 (로그인 요청)
-    PKT_RES_LOGIN = 13,    // 서버 -> 클라이언트 (로그인 결과/PK 응답)
+    PKT_REQ_DELETE = 9,         // 클라이언트 -> 서버 (삭제 요청)
+    PKT_RES_DELETE = 10,        // 서버 -> 클라이언트 (삭제 결과 응답)
+                                // --- 인증 관련 (10~13) ---
+    PKT_REQ_REGISTER = 11,      // 클라이언트 -> 서버 (회원가입 요청)
+    PKT_RES_REGISTER = 12,      // 서버 -> 클라이언트 (가입 결과/PK 응답)
+    PKT_REQ_LOGIN = 13,         // 클라이언트 -> 서버 (로그인 요청)
+    PKT_RES_LOGIN = 14,         // 서버 -> 클라이언트 (로그인 결과/PK 응답)
 
     // [이메일 인증 관련 패킷]
     PKT_REQ_EMAIL_AUTH = 20,   // 클라이언트 -> 서버: "이 주소로 메일 보내줘"
@@ -68,14 +68,14 @@ typedef enum
 #pragma pack(push, 1)
 struct FilePacket
 {
-    int16_t type;      // PacketType
-    int32_t user_pk;   // 유저 PK
-    int32_t file_pk;   // 파일 PK (업로드 시 서버가 발급, 다운로드 시 클라이언트가 요청)
-    long offset;       // 파일의 어느 위치부터 데이터를 담고 있는지 나타내는 필드입니다. 업로드 시에는 0으로 보내지만, 다운로드 시에는 0부터 시작해서 8KB씩 증가하는 값을 보냅니다. 이렇게 하면 나중에 이어받기 기능을 추가할 때도 이 필드를 활용할 수 있습니다.
-    int32_t data_size; // 실제로 담긴 데이터의 크기입니다. 업로드 시에는 8KB 이하로 보내지만, 마지막 조각은 8KB보다 작을 수 있기 때문에 이 필드가 필요합니다. 다운로드 시에도 8KB씩 보내지만, 마지막 조각은 8KB보다 작을 수 있기 때문에 이 필드가 필요합니다.
-    int64_t file_size; // 파일 전체 크기입니다. 다운로드 시작 응답에서 클라이언트에게 파일 크기를 알려주기 위해 사용됩니다. 업로드 시에는 0으로 보내지만, 다운로드 시에는 실제 파일 크기를 담아서 보냅니다.
+    int16_t type;       // PacketType
+    int32_t user_pk;    // 유저 PK
+    int32_t file_pk;    // 파일 PK (업로드 시 서버가 발급, 다운로드 시 클라이언트가 요청)
+    long offset;        // 파일의 어느 위치부터 데이터를 담고 있는지 나타내는 필드입니다. 업로드 시에는 0으로 보내지만, 다운로드 시에는 0부터 시작해서 8KB씩 증가하는 값을 보냅니다. 이렇게 하면 나중에 이어받기 기능을 추가할 때도 이 필드를 활용할 수 있습니다.
+    int32_t data_size;  // 실제로 담긴 데이터의 크기입니다. 업로드 시에는 8KB 이하로 보내지만, 마지막 조각은 8KB보다 작을 수 있기 때문에 이 필드가 필요합니다. 다운로드 시에도 8KB씩 보내지만, 마지막 조각은 8KB보다 작을 수 있기 때문에 이 필드가 필요합니다.
+    int64_t file_size;  // 파일 전체 크기입니다. 다운로드 시작 응답에서 클라이언트에게 파일 크기를 알려주기 위해 사용됩니다. 업로드 시에는 0으로 보내지만, 다운로드 시에는 실제 파일 크기를 담아서 보냅니다.
     char fileName[256]; // 파일 이름을 저장할 공간 (최대 256바이트)
-    char data[8192];   // 8KB 데이터 그릇
+    char data[8192];    // 8KB 데이터 그릇
 };
 #pragma pack(pop)
 

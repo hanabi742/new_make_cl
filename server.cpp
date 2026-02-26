@@ -8,7 +8,7 @@
 #include "Protocol.hpp"
 #include "AuthManager.hpp"
 #include "StorageManager.hpp"
-#include "MsgServerLogic.hpp"  // 메시지 서버 (포트 9001)
+#include "MsgServerLogic.hpp" // 메시지 서버 (포트 9001)
 
 using namespace std;
 using namespace std::filesystem;
@@ -37,7 +37,9 @@ int main()
     cout << "[Server] 저장소 준비 완료!" << endl;
 
     // 메시지 서버 별도 스레드로 실행 (포트 9001)
-    thread([]{ serverMain(); }).detach();
+    thread([]
+           { serverMain(); })
+        .detach();
     cout << "[Server] 메시지 서버 스레드 시작 (Port: 9001)" << endl;
 
     int server_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -57,8 +59,9 @@ int main()
     cout << "[Server] 클라이언트 연결됨!" << endl;
 
     FilePacket *packet = new FilePacket();
-    int fake_db_pk_counter = 100;
 
+    string current_original_name = "";
+    size_t current_file_size = 0;
     bool is_uploading = false;
     int current_user = -1;
     int current_file = -1;
@@ -89,16 +92,34 @@ int main()
         {
         case PKT_REQ_UPLOAD_START:
         {
-            cout << "[Server] 업로드 요청. 유저: " << packet->user_pk << endl;
+            cout << "[Upload] 요청 - 유저PK: " << packet->user_pk << endl;
             current_original_name = packet->data;
             current_file_size = packet->file_size;
 
+            // 💡 [변경 1] 사용자 등급별 최대 용량 계산 (예시 하드코딩 유지, UserManager 연동 추천)
             size_t max_quota = (packet->user_pk == 10) ? (100 * 1024 * 1024) : (10 * 1024 * 1024);
-            size_t current_used = storage.getUserTotalUsed(packet->user_pk);
 
-            if (current_used + current_file_size > max_quota)
+            // 💡 [변경 2] 새로 추가된 getRemainingQuota 함수로 '남은 용량'을 정확히 계산
+            long long remaining_quota = storage.getRemainingQuota(packet->user_pk, max_quota);
+
+            if (current_file_size > remaining_quota)
             {
-                cout << "[경고] 용량 초과! 업로드 거부." << endl;
+                cout << "[거부] 용량 초과! (남은 용량: " << remaining_quota << " 바이트)" << endl;
+                FilePacket res = {};
+                res.type = PKT_RES_UPLOAD_END;
+                res.file_pk = -1; // 실패 신호
+                send(client_sock, (char *)&res, sizeof(FilePacket), 0);
+                break;
+            }
+
+            storage.createUserDirectory(packet->user_pk);
+
+            // 💡 [변경 3] 가짜 카운터(fake_db_pk_counter) 삭제! DB에서 진짜 고유 PK 발급
+            int real_file_pk = storage.createPendingFileRecord(packet->user_pk, current_original_name, current_file_size);
+
+            if (real_file_pk < 0)
+            {
+                cout << "[거부] DB 레코드 생성 실패" << endl;
                 FilePacket res = {};
                 res.type = PKT_RES_UPLOAD_END;
                 res.file_pk = -1;
@@ -106,35 +127,38 @@ int main()
                 break;
             }
 
-            storage.createUserDirectory(packet->user_pk);
-            fake_db_pk_counter++;
-
             is_uploading = true;
             current_user = packet->user_pk;
-            current_file = fake_db_pk_counter;
+            current_file = real_file_pk; // 세션 변수에 진짜 PK 저장
 
             FilePacket res = {};
             res.type = PKT_RES_UPLOAD_START;
-            res.file_pk = current_file;
+            res.file_pk = real_file_pk; // 클라이언트에게 진짜 DB PK 전달
             send(client_sock, (char *)&res, sizeof(FilePacket), 0);
             break;
         }
 
+        // ── [파일 조각 수신] ──────────────────────────────────────────
         case PKT_REQ_UPLOAD_CHUNK:
         {
+            // 이제 packet->file_pk는 무조건 DB에 존재하는 고유한 값입니다.
             storage.saveTempChunk(packet->user_pk, packet->file_pk, packet->data, packet->data_size);
             break;
         }
 
+        // ── [파일 업로드 완료] ──────────────────────────────────────────
         case PKT_REQ_UPLOAD_END:
         {
-            int db_file_pk = -1;
-            if (storage.moveFileToFinal(packet->user_pk, packet->file_pk,
-                                        current_original_name, current_file_size,
-                                        &db_file_pk))
+            // 1. 임시 파일을 최종 위치(.dat)로 이동하고 JSON 메타데이터 기록
+            if (storage.moveFileToFinal(packet->user_pk, packet->file_pk, current_original_name, current_file_size))
             {
-                cout << "[Server] 업로드 확정 완료. 파일: " << current_original_name
-                     << " | DB FILE_PK: " << db_file_pk << endl;
+                // 2. 최종 저장된 물리적 서버 경로
+                std::string server_path = "./storage/server/" + std::to_string(packet->user_pk) + "/" + std::to_string(packet->file_pk) + ".dat";
+
+                // 💡 [변경 4] 새로 INSERT 하는 것이 아니라, 기존 레코드에 서버 경로(SERVER_PATH)만 UPDATE
+                storage.finalizeFileRecord(packet->file_pk, server_path);
+
+                cout << "[Upload End] 파일 저장 및 DB 업데이트 완료 (PK: " << packet->file_pk << ")" << endl;
                 is_uploading = false;
 
                 FilePacket res = {};
@@ -145,9 +169,12 @@ int main()
             break;
         }
 
+        // ── [파일 다운로드 시작] ──────────────────────────────────────────
         case PKT_REQ_DOWNLOAD_START:
         {
+            // 💡 [핵심] StorageManager 내부에서 DB를 조회하여 실제 경로를 찾아 크기를 반환하도록 설계됨
             size_t fsize = storage.getFileSize(packet->user_pk, packet->file_pk);
+
             FilePacket res = {};
             res.type = PKT_RES_DOWNLOAD_START;
             res.file_size = fsize;
@@ -161,6 +188,7 @@ int main()
                     FilePacket chunk = {};
                     chunk.type = PKT_RES_DOWNLOAD_DATA;
                     size_t read_bytes = storage.readFileChunk(packet->user_pk, packet->file_pk, offset, chunk.data);
+
                     if (read_bytes > 0)
                     {
                         chunk.data_size = (int)read_bytes;
@@ -169,8 +197,12 @@ int main()
                         offset += read_bytes;
                     }
                     else
-                        break;
+                        break; // 더 이상 읽을 데이터가 없으면 탈출
                 }
+            }
+            else
+            {
+                cout << "[Error] 다운로드 실패: 파일 크기가 0이거나 파일을 찾을 수 없음 (PK: " << packet->file_pk << ")" << endl;
             }
             break;
         }
