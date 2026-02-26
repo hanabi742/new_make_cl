@@ -65,9 +65,6 @@ int main()
     bool is_uploading = false;
     int current_user = -1;
     int current_file = -1;
-    string current_original_name = "";
-    size_t current_file_size = 0;
-
     string session_email = "";
 
     while (true)
