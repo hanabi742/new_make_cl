@@ -45,6 +45,7 @@ void remove_client(int sock)
 void handle_client(int client_sock, string client_ip, AuthManager &auth, StorageManager &storage, UserManager &user_mgr, AdminManager &admin)
 {
     FilePacket *packet = new FilePacket();
+    
     string current_original_name = "";
     size_t current_file_size = 0;
     bool is_uploading = false;

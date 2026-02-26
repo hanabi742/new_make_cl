@@ -32,14 +32,14 @@ private:
     // ── DB 연결 초기화 ────────────────────────────────────────────────────────
     bool initDB()
     {
-        cout << "[AuthDB] initDB() 시작... (host=10.10.20.101, user=JIHOON, db=USERS)" << endl;
+        cout << "[AuthDB] initDB() 시작... (host=10.10.20.101, user=HEECHANG, db=USERS)" << endl;
         db_conn = mysql_init(NULL);
         if (!db_conn)
         {
             cerr << "[AuthDB Error] mysql_init 실패" << endl;
             return false;
         }
-        if (!mysql_real_connect(db_conn, "10.10.20.101", "JIHOON", "1234", "USERS", 0, NULL, 0))
+        if (!mysql_real_connect(db_conn, "10.10.20.101", "HEECHANG", "1234", "USERS", 0, NULL, 0))
         {
             cerr << "[AuthDB Error] DB 연결 실패!" << endl;
             cerr << "[AuthDB Error] 에러 코드  : " << mysql_errno(db_conn) << endl;

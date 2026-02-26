@@ -18,7 +18,7 @@ public:
     UserManager(AuthManager &a, StorageManager &s) : auth(a), storage(s)
     {
         conn = mysql_init(NULL);
-        if (mysql_real_connect(conn, "localhost", "JAEHOON", "1234", "USERS", 0, NULL, 0) == NULL)
+        if (mysql_real_connect(conn, "10.10.20.101", "HEECHANG", "1234", "USERS", 0, NULL, 0) == NULL)
         {
             std::cerr << "[User DB Error] 유저 DB 연결 실패: " << mysql_error(conn) << std::endl;
             conn = nullptr;

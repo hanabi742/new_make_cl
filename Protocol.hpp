@@ -128,7 +128,9 @@ struct AuthPacket
     char pwd_hash[65]; // 클라이언트가 SHA-256으로 변환해서 보낼 64자리 비밀번호 + NULL
     char name[10];     // [추가] 회원가입 시 받을 이름 필드 (ERD varchar(5) 고려)
 };
+#pragma pack(pop)
 
+#pragma pack(push, 1)
 struct AuthResponse
 {
     int16_t type;    // PKT_RES_REGISTER 또는 PKT_RES_LOGIN

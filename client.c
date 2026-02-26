@@ -548,7 +548,7 @@ void admin_menu(int sock, int admin_pk) {
         printf("  1. 전체 공지사항 발송\n");
         printf("  2. 특정 유저 차단 (BAN)\n");
         printf("  3. 시스템 전체 초기화 (주의!)\n");
-        printf("  0. 이전 메뉴로\n");
+        printf("  0. 일반 메뉴로\n");
         printf("  선택: ");
         scanf("%d", &choice);
         FLUSH_STDIN();
@@ -599,6 +599,10 @@ int main()
         perror("[Error] 서버 연결 실패");
         return -1;
     }
+    struct ServerHandshakeHeader hand;
+    recv_all(sock, (char*)&hand, sizeof(hand)); 
+    printf("  [System] 서버 버전: %.1f, 현재 접속자: %d/%d\n", 
+    hand.server_version, hand.current_users, hand.max_users);
 
     CLEAR();
     printf("  [System] 서버(%s) 접속 성공!\n\n", target_ip);
@@ -672,7 +676,7 @@ int main()
             user_pk = request_auth(sock, PKT_REQ_LOGIN, email, pw, "");
             if (user_pk > 0)
             {
-                printf("  [Success] 로그인 성공!\n");
+                printf("  [Success] %d번 로그인 성공!\n",user_pk);
                 // 관리자 PK가 1번인 경우 관리자 메뉴 활성화
                 if (user_pk == 8)
                 {
