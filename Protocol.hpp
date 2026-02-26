@@ -18,7 +18,7 @@ namespace fs = std::filesystem;
 #endif
 
 /* 3. OS별 네트워크 헤더 분리 */
-#ifdef _WIN32
+#ifdef _WIN32F
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #ifdef _MSC_VER
@@ -35,7 +35,6 @@ namespace fs = std::filesystem;
 #define MAX_PACKET_SIZE (64 * 1024)
 #define STORAGE_ROOT "./storage"
 
-
 /* 5. 패킷 타입 정의 (enum 사용) */
 typedef enum
 {
@@ -50,62 +49,35 @@ typedef enum
     PKT_REQ_DOWNLOAD_START = 6, // 클라이언트 -> 서버 (다운로드 요청)
     PKT_RES_DOWNLOAD_START = 7, // 서버 -> 클라이언트 (파일 정보/크기 응답)
     PKT_RES_DOWNLOAD_DATA = 8,  // 서버 -> 클라이언트 (파일 데이터 전송)
-
-    // --- 인증 관련 (10~13) ---
-    PKT_REQ_REGISTER = 10, // 클라이언트 -> 서버 (회원가입 요청)
-    PKT_RES_REGISTER = 11, // 서버 -> 클라이언트 (가입 결과/PK 응답)
-    PKT_REQ_LOGIN = 12,    // 클라이언트 -> 서버 (로그인 요청)
-    PKT_RES_LOGIN = 13,    // 서버 -> 클라이언트 (로그인 결과/PK 응답)
+    PKT_REQ_DELETE = 9,         // 클라이언트 -> 서버 (삭제 요청)
+    PKT_RES_DELETE = 10,        // 서버 -> 클라이언트 (삭제 결과 응답)
+                                // --- 인증 관련 (10~13) ---
+    PKT_REQ_REGISTER = 11,      // 클라이언트 -> 서버 (회원가입 요청)
+    PKT_RES_REGISTER = 12,      // 서버 -> 클라이언트 (가입 결과/PK 응답)
+    PKT_REQ_LOGIN = 13,         // 클라이언트 -> 서버 (로그인 요청)
+    PKT_RES_LOGIN = 14,         // 서버 -> 클라이언트 (로그인 결과/PK 응답)
 
     // [이메일 인증 관련 패킷]
     PKT_REQ_EMAIL_AUTH = 20,   // 클라이언트 -> 서버: "이 주소로 메일 보내줘"
     PKT_RES_EMAIL_AUTH = 21,   // 서버 -> 클라이언트: "메일 보냈어(성공/실패)"
     PKT_REQ_EMAIL_VERIFY = 22, // 클라이언트 -> 서버: "내가 입력한 번호(123456) 맞니?"
-    PKT_RES_EMAIL_VERIFY = 23,  // 서버 -> 클라이언트: "번호 맞다/틀리다"
+    PKT_RES_EMAIL_VERIFY = 23  // 서버 -> 클라이언트: "번호 맞다/틀리다"
 
-        // --- 파일 관리 확장 (40~46) ---
-    PKT_REQ_LIST = 40,          // 목록 요청
-    PKT_RES_LIST = 41,          // 목록 응답 (개별 파일 정보)
-    PKT_RES_LIST_END = 42,      // 목록 응답 완료
-    PKT_REQ_DELETE = 43,        // 단일 파일 삭제
-    PKT_RES_DELETE = 44,        // 삭제 결과
-    PKT_REQ_DELETE_FOLDER = 45, // 폴더 전체 삭제
-    PKT_RES_DELETE_FOLDER = 46, // 폴더 삭제 결과
-
-    // --- 관리자 기능 (90~99) ---
-    // PKT_REQ_ADMIN_BAN = 91,  // 유저 차단
-    PKT_RES_HANDSHAKE = 100, // 접속 직후 서버가 내려주는 최초 헤더
-
-    PKT_REQ_FILE_LIST = 110,   // 파일 목록 요청
-    PKT_RES_FILE_LIST = 111,   // 파일 목록 응답
-    PKT_REQ_DELETE_FILE = 112, // 특정 파일 삭제 요청
-    PKT_RES_DELETE_FILE = 113, // 삭제 결과 응답
-
-    PKT_REQ_ADMIN_NOTICE = 200, // 공지 발송 요청
-    PKT_REQ_ADMIN_BAN = 201,    // 유저 차단 요청
-    PKT_REQ_ADMIN_RESET = 202,  // 서버 초기화 요청
-    PKT_REQ_ADMIN_USAGE = 203,  // (기존 92번을 203으로 통합)
-
-    PKT_REQ_USER_SETTINGS = 300, // 클라 -> 서버: 개인 설정 변경 요청
-    PKT_RES_USER_SETTINGS = 301, // 서버 -> 클라: 설정 변경 결과
-
-    PKT_REQ_STORAGE_INFO = 310, // 용량 정보 요청
-    PKT_RES_STORAGE_INFO = 311  // 용량 정보 응답
-
+   
 } PacketType;
 
 /* 6. 패킷 구조체 (1바이트 정렬) */
 #pragma pack(push, 1)
 struct FilePacket
 {
-    int16_t type;      // PacketType
-    int32_t user_pk;   // 유저 PK
-    int32_t file_pk;   // 파일 PK (업로드 시 서버가 발급, 다운로드 시 클라이언트가 요청)
-    long offset;       // 파일의 어느 위치부터 데이터를 담고 있는지 나타내는 필드입니다. 업로드 시에는 0으로 보내지만, 다운로드 시에는 0부터 시작해서 8KB씩 증가하는 값을 보냅니다. 이렇게 하면 나중에 이어받기 기능을 추가할 때도 이 필드를 활용할 수 있습니다.
-    int32_t data_size; // 실제로 담긴 데이터의 크기입니다. 업로드 시에는 8KB 이하로 보내지만, 마지막 조각은 8KB보다 작을 수 있기 때문에 이 필드가 필요합니다. 다운로드 시에도 8KB씩 보내지만, 마지막 조각은 8KB보다 작을 수 있기 때문에 이 필드가 필요합니다.
-    int64_t file_size; // 파일 전체 크기입니다. 다운로드 시작 응답에서 클라이언트에게 파일 크기를 알려주기 위해 사용됩니다. 업로드 시에는 0으로 보내지만, 다운로드 시에는 실제 파일 크기를 담아서 보냅니다.
+    int16_t type;       // PacketType
+    int32_t user_pk;    // 유저 PK
+    int32_t file_pk;    // 파일 PK (업로드 시 서버가 발급, 다운로드 시 클라이언트가 요청)
+    long offset;        // 파일의 어느 위치부터 데이터를 담고 있는지 나타내는 필드입니다. 업로드 시에는 0으로 보내지만, 다운로드 시에는 0부터 시작해서 8KB씩 증가하는 값을 보냅니다. 이렇게 하면 나중에 이어받기 기능을 추가할 때도 이 필드를 활용할 수 있습니다.
+    int32_t data_size;  // 실제로 담긴 데이터의 크기입니다. 업로드 시에는 8KB 이하로 보내지만, 마지막 조각은 8KB보다 작을 수 있기 때문에 이 필드가 필요합니다. 다운로드 시에도 8KB씩 보내지만, 마지막 조각은 8KB보다 작을 수 있기 때문에 이 필드가 필요합니다.
+    int64_t file_size;  // 파일 전체 크기입니다. 다운로드 시작 응답에서 클라이언트에게 파일 크기를 알려주기 위해 사용됩니다. 업로드 시에는 0으로 보내지만, 다운로드 시에는 실제 파일 크기를 담아서 보냅니다.
     char fileName[256]; // 파일 이름을 저장할 공간 (최대 256바이트)
-    char data[8192];   // 8KB 데이터 그릇
+    char data[8192];    // 8KB 데이터 그릇
 };
 #pragma pack(pop)
 
@@ -124,34 +96,19 @@ namespace ServerConfig
 struct AuthPacket
 {
     int16_t type;      // PKT_REQ_REGISTER 또는 PKT_REQ_LOGIN
+    int32_t user_pk;       //개인설정 요청 시 대상 사용자 PK (로그인/가입 시에는 0)재훈추가
     char id[25];       // 유저 아이디
     char pwd_hash[65]; // 클라이언트가 SHA-256으로 변환해서 보낼 64자리 비밀번호 + NULL
+    char new_pwd_hash[65]; // 비밀번호 변경 시 새 PW 해시 (추가) 재훈추가
     char name[10];     // [추가] 회원가입 시 받을 이름 필드 (ERD varchar(5) 고려)
+    char new_email[65];    // ERD: DEFAULT_EMAIL VARCHAR(64) 전송용 (추가)
 };
 
 struct AuthResponse
 {
     int16_t type;    // PKT_RES_REGISTER 또는 PKT_RES_LOGIN
     int32_t user_pk; // 성공 시 발급/조회된 고유 PK (실패 시 -1)
-};
-#pragma pack(pop)
-
-#pragma pack(push, 1)
-struct AdminPacket     // 관리자가 서버로 명령을 보낼 때 사용할 구조체
-{
-    int16_t type;      // 위에서 정의한 200, 201, 202 중 하나
-    int32_t admin_pk;  // 요청하는 사람의 PK (보안 검증용, 무조건 1이어야 함)
-    int32_t target_pk; // 차단할 대상 유저의 PK (차단 기능에서만 사용)
-    char data[256];    // 공지사항 메시지 등 문자열 데이터
-};
-#pragma pack(pop)
-
-#pragma pack(push, 1)
-struct UserSettingsPacket
-{
-    int16_t type;         // PKT_REQ_USER_SETTINGS
-    int32_t user_pk;      // 변경을 요청하는 유저의 PK
-    int32_t setting_type; // 1: 이름 변경, 2: 비밀번호 변경
-    char new_data[65];    // 새 이름, 또는 해시화된 새 비밀번호
+    char     name[6];// 재훈추가
+    char     default_email[65];//재훈추가
 };
 #pragma pack(pop)
