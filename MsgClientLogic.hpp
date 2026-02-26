@@ -216,6 +216,7 @@ inline void* alarm_thread(void* arg)
 //  메뉴: 메시지 보내기
 // ============================================================
 inline void menu_send() {
+    system("clear");
     char receiver[256] = {0};
     char content[MAX_CONTENT + 1] = {0};
     char res[MAX_BODY];
@@ -333,6 +334,7 @@ inline void menu_send() {
 //  메뉴: 메시지 확인 (목록 + 페이지네이션)
 // ============================================================
 inline void menu_view() {
+    system("clear");
     char body[512], res[MAX_BODY];
     int  page  = 1;
     long long total = 0;
@@ -454,6 +456,7 @@ inline void menu_view() {
 // ============================================================
 inline void menu_message() {
     while (1) {
+        system("clear");
         lock();
         int unread = g_unread;
         unlock();

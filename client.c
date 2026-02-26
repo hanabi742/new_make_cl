@@ -235,9 +235,60 @@ int upload_file(int sock, int user_pk, const char *filename)
 
     send(sock, (char *)pkt, sizeof(*pkt), 0);
 
-    if (recv_all(sock, (char *)pkt, sizeof(*pkt)) > 0 && pkt->type == PKT_RES_UPLOAD_END)
-        printf("  [Success] 업로드 완료!\n");
+    // 서버로부터 UPLOAD_START 응답 (file_pk) 받기
+    if (recv_all(sock, (char *)pkt, sizeof(*pkt)) <= 0 || pkt->type != PKT_RES_UPLOAD_START)
+    {
+        printf("  [Error] 업로드 시작 실패\n");
+        fclose(fp);
+        free(pkt);
+        return -1;
+    }
 
+    file_pk = pkt->file_pk;
+    if (file_pk < 0)
+    {
+        printf("  [Error] 서버 거부 (용량 초과 또는 DB 오류)\n");
+        fclose(fp);
+        free(pkt);
+        return -1;
+    }
+
+    // 파일을 8KB씩 나눠서 전송
+    long offset = 0;
+    while (offset < fsize)
+    {
+        memset(pkt, 0, sizeof(*pkt));
+        pkt->type    = PKT_REQ_UPLOAD_CHUNK;
+        pkt->user_pk = user_pk;
+        pkt->file_pk = file_pk;
+        pkt->offset  = offset;
+
+        int read_bytes = fread(pkt->data, 1, sizeof(pkt->data), fp);
+        if (read_bytes <= 0) break;
+
+        pkt->data_size = read_bytes;
+        send(sock, (char *)pkt, sizeof(*pkt), 0);
+        offset += read_bytes;
+
+        printf("\r  [%ld / %ld bytes]", offset, fsize);
+        fflush(stdout);
+    }
+    printf("\n");
+
+    // 업로드 완료 신호 전송
+    memset(pkt, 0, sizeof(*pkt));
+    pkt->type    = PKT_REQ_UPLOAD_END;
+    pkt->user_pk = user_pk;
+    pkt->file_pk = file_pk;
+    send(sock, (char *)pkt, sizeof(*pkt), 0);
+
+    // 최종 응답 대기
+    if (recv_all(sock, (char *)pkt, sizeof(*pkt)) > 0 && pkt->type == PKT_RES_UPLOAD_END && pkt->file_pk > 0)
+        printf("  [Success] 업로드 완료! (PK: %d)\n", file_pk);
+    else
+        printf("  [Error] 업로드 최종 확인 실패\n");
+
+    fclose(fp);
     free(pkt);
     return file_pk;
 }
@@ -248,26 +299,29 @@ void request_file_list(int sock, int user_pk)
     pkt.type = 40; // PKT_REQ_LIST
     pkt.user_pk = user_pk;
 
-    send(sock, (char *)&pkt, sizeof(pkt), 0);
+    if (send(sock, (char *)&pkt, sizeof(pkt), 0) < 0) return;
+
     printf("\n  [목록 조회 중...]\n");
+    // 헤더 출력은 루프 밖에서 한 번만
     printf("  %-8s | %-20s | %-10s\n", "PK", "파일명", "크기(Byte)");
     printf("  --------------------------------------------\n");
 
     while (1)
     {
-        if (recv_all(sock, (char *)&pkt, sizeof(pkt)) <= 0)
-            break;
+        // 서버로부터 패킷 하나를 통째로 읽음
+        if (recv_all(sock, (char *)&pkt, sizeof(pkt)) <= 0) break;
 
-        if (pkt.type == 42)
-            break; // PKT_RES_LIST_END 면 종료
+        // ★ 서버가 "목록 전송 끝" 신호(42)를 보내면 루프 탈출
+        if (pkt.type == 42) {
+            break; 
+        }
 
-        if (pkt.type == 41)
-        { // PKT_RES_LIST
-            // 서버가 보낸 JSON 데이터(pkt.data)를 파싱 (여기선 간단히 출력 예시)
-            // 실제로는 nlohmann/json 등을 사용하거나 문자열 파싱 필요
+        // 목록 데이터(41)인 경우에만 출력
+        if (pkt.type == 41) {
             printf("  %s\n", pkt.data);
         }
     }
+    printf("  --------------------------------------------\n");
 }
 
 void download_file(int sock, int user_pk, int file_pk, const char *save_path, const char *filename)
