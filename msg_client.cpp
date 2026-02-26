@@ -4,7 +4,7 @@
 // ============================================================
 #include "MsgClientLogic.hpp"
 #include "msg_client.h"
-
+static char g_user_email[64] = {0};
 extern "C"
 {
 
@@ -31,6 +31,11 @@ extern "C"
         }
 
         g_user_pk = user_pk;
+        if (email != NULL) 
+        {
+            strncpy(g_user_email, email, sizeof(g_user_email) - 1);
+            g_user_email[sizeof(g_user_email) - 1] = '\0';
+        }
 
         // 5초 폴링 스레드 시작
         pthread_t tid;
