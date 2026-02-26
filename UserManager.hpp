@@ -6,6 +6,7 @@
 #include "AuthManager.hpp"
 #include "StorageManager.hpp"
 #include "Protocol.hpp"
+#include "DBConfig.hpp"
 
 class UserManager
 {
@@ -18,7 +19,7 @@ public:
     UserManager(AuthManager &a, StorageManager &s) : auth(a), storage(s)
     {
         conn = mysql_init(NULL);
-        if (mysql_real_connect(conn, "localhost", "JAEHOON", "1234", "USERS", 0, NULL, 0) == NULL)
+        if (mysql_real_connect(conn, DB_HOST, DB_USER, DB_PASS, DB_NAME, 0, NULL, 0) == NULL)
         {
             std::cerr << "[User DB Error] 유저 DB 연결 실패: " << mysql_error(conn) << std::endl;
             conn = nullptr;

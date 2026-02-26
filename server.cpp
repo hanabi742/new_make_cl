@@ -61,9 +61,9 @@ int main()
     listen(server_sock, 5);
     cout << "[Server] 클라이언트 접속 대기 중... (Port: 9000)" << endl;
 
-    int client_sock = accept(server_sock, nullptr, nullptr);
-    cout << "[Server] 클라이언트 연결됨!" << endl;
-
+    // 클라이언트 1명을 처리하는 람다 (스레드로 실행됨)
+    auto handle_client = [&](int client_sock)
+    {
     FilePacket *packet = new FilePacket();
 
     string current_original_name = "";
@@ -408,6 +408,23 @@ int main()
 
     delete packet;
     close(client_sock);
+    }; // handle_client 람다 끝
+
+    // 클라이언트 접속을 무한정 받는 루프
+    while (true)
+    {
+        int client_sock = accept(server_sock, nullptr, nullptr);
+        if (client_sock < 0)
+        {
+            cerr << "[Server] accept 실패, 계속 대기..." << endl;
+            continue;
+        }
+        cout << "[Server] 클라이언트 연결됨!" << endl;
+
+        // 클라이언트마다 별도 스레드로 처리 (서버는 계속 대기)
+        thread(handle_client, client_sock).detach();
+    }
+
     close(server_sock);
     return 0;
 }

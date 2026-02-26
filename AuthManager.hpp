@@ -11,6 +11,7 @@
 #include <ctime>
 #include <set>
 #include <mariadb/mysql.h>
+#include "DBConfig.hpp"
 
 using namespace std;
 using namespace std::filesystem;
@@ -32,14 +33,14 @@ private:
     // ── DB 연결 초기화 ────────────────────────────────────────────────────────
     bool initDB()
     {
-        cout << "[AuthDB] initDB() 시작... (host=10.10.20.101, user=JIHOON, db=USERS)" << endl;
+        cout << "[AuthDB] initDB() 시작... (host=" DB_HOST ", user=" DB_USER ", db=" DB_NAME ")" << endl;
         db_conn = mysql_init(NULL);
         if (!db_conn)
         {
             cerr << "[AuthDB Error] mysql_init 실패" << endl;
             return false;
         }
-        if (!mysql_real_connect(db_conn, "10.10.20.101", "JIHOON", "1234", "USERS", 0, NULL, 0))
+        if (!mysql_real_connect(db_conn, DB_HOST, DB_USER, DB_PASS, DB_NAME, 0, NULL, 0))
         {
             cerr << "[AuthDB Error] DB 연결 실패!" << endl;
             cerr << "[AuthDB Error] 에러 코드  : " << mysql_errno(db_conn) << endl;
@@ -220,8 +221,8 @@ private:
 
     bool sendMailViaCurl(const string &target_email, const string &auth_code)
     {
-        string my_email     = "taehyunny0312@gmail.com";
-        string app_password = "rnwz koev idvf mmna";
+        string my_email     = MAIL_FROM_ADDR;
+        string app_password = MAIL_APP_PASS;
 
         string payload_text =
             "To: "   + target_email + "\r\n" +

@@ -20,6 +20,7 @@
 #include <stdint.h>
 
 #include "msg_protocol.hpp"
+#include "DBConfig.hpp"
 
 // ============================================================
 //  간이 JSON 빌더 / 파서
@@ -137,13 +138,13 @@ namespace NetHelper {
 // ============================================================
 namespace DBHelper {
     inline MYSQL* connect() {
-        std::cout << "[DBHelper] DB 연결 시도... (host=10.10.20.101, user=JIHOON, db=USERS)" << std::endl;
+        std::cout << "[DBHelper] DB 연결 시도... (host=" DB_HOST ", user=" DB_USER ", db=" DB_NAME ")" << std::endl;
         MYSQL* c = mysql_init(NULL);
         if (!c) {
             std::cerr << "[DBHelper Error] mysql_init 실패" << std::endl;
             return nullptr;
         }
-        if (!mysql_real_connect(c, "10.10.20.101", "JIHOON", "1234", "USERS", 0, NULL, 0)) {
+        if (!mysql_real_connect(c, DB_HOST, DB_USER, DB_PASS, DB_NAME, 0, NULL, 0)) {
             std::cerr << "[DBHelper Error] 연결 실패!" << std::endl;
             std::cerr << "[DBHelper Error] 에러 코드  : " << mysql_errno(c) << std::endl;
             std::cerr << "[DBHelper Error] 에러 메시지: " << mysql_error(c) << std::endl;
