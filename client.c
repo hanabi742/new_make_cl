@@ -13,13 +13,29 @@
 // ═══════════════════════════════════════════════════════════
 
 // ANSI 화면 클리어 + 커서 맨 위
-#define CLEAR()      do { printf("\033[2J\033[H"); fflush(stdout); } while(0)
+#define CLEAR()                  \
+    do                           \
+    {                            \
+        printf("\033[2J\033[H"); \
+        fflush(stdout);          \
+    } while (0)
 
 // scanf 후 stdin 버퍼에 남은 개행/문자 제거 (서브메뉴 오입력 원천 차단)
-#define FLUSH_STDIN() do { int _c; while ((_c = getchar()) != '\n' && _c != EOF); } while(0)
+#define FLUSH_STDIN()                                 \
+    do                                                \
+    {                                                 \
+        int _c;                                       \
+        while ((_c = getchar()) != '\n' && _c != EOF) \
+            ;                                         \
+    } while (0)
 
 // 결과 출력 후 Enter 대기
-#define PAUSE()      do { printf("\n  [Enter] 계속..."); FLUSH_STDIN(); } while(0)
+#define PAUSE()                        \
+    do                                 \
+    {                                  \
+        printf("\n  [Enter] 계속..."); \
+        FLUSH_STDIN();                 \
+    } while (0)
 
 // ═══════════════════════════════════════════════════════════
 //  네트워크 헬퍼
@@ -27,9 +43,11 @@
 int recv_all(int sock, char *buf, int size)
 {
     int total = 0;
-    while (total < size) {
+    while (total < size)
+    {
         int n = recv(sock, buf + total, size - total, 0);
-        if (n <= 0) return n;
+        if (n <= 0)
+            return n;
         total += n;
     }
     return total;
@@ -41,7 +59,8 @@ int recv_all(int sock, char *buf, int size)
 void get_default_download_path(const char *filename, char *out_path)
 {
     const char *home = getenv("HOME");
-    if (!home) home = getenv("USERPROFILE");
+    if (!home)
+        home = getenv("USERPROFILE");
     if (home)
         sprintf(out_path, "%s/Downloads/%s", home, filename);
     else
@@ -59,6 +78,37 @@ void hash_password(const char *plain, char *out)
         sprintf(out + i * 2, "%02x", hash[i]);
     out[64] = '\0';
 }
+void delete_file(int sock, int user_pk, int file_pk)
+{
+    struct FilePacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+
+    // 삭제 요청 패킷 세팅
+    pkt.type = PKT_REQ_DELETE; // Protocol.hpp에 정의되어 있어야 함
+    pkt.user_pk = user_pk;
+    pkt.file_pk = file_pk;
+
+    printf("  [System] 서버에 파일 삭제를 요청합니다...\n");
+    send(sock, (char *)&pkt, sizeof(pkt), 0);
+
+    // 서버의 응답 대기
+    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0)
+    {
+        if (pkt.type == PKT_RES_DELETE && pkt.file_pk == 1)
+        {
+            printf("  [Success] 파일(PK: %d)이 성공적으로 삭제되었습니다.\n", file_pk);
+            printf("  [System] 남은 저장소 용량이 복구되었습니다!\n");
+        }
+        else
+        {
+            printf("  [Error] 파일 삭제 실패. (권한이 없거나 이미 삭제된 파일입니다)\n");
+        }
+    }
+    else
+    {
+        printf("  [Error] 서버 응답이 없습니다.\n");
+    }
+}
 
 // ═══════════════════════════════════════════════════════════
 //  인증
@@ -69,7 +119,8 @@ int handle_email_auth(int sock, char *out_email)
     struct FilePacket pkt;
 
     printf("  이메일 주소: ");
-    scanf("%63s", out_email); FLUSH_STDIN();
+    scanf("%63s", out_email);
+    FLUSH_STDIN();
 
     memset(&pkt, 0, sizeof(pkt));
     pkt.type = 20;
@@ -77,20 +128,23 @@ int handle_email_auth(int sock, char *out_email)
     send(sock, (char *)&pkt, sizeof(pkt), 0);
 
     printf("  [System] 인증 메일 발송 중...\n");
-    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.file_pk == -1) {
+    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.file_pk == -1)
+    {
         printf("  [Error] 발송 실패 (이미 가입된 이메일이거나 서버 오류)\n");
         return 0;
     }
 
     printf("  [Success] 메일 발송 완료. 6자리 인증번호: ");
-    scanf("%15s", code); FLUSH_STDIN();
+    scanf("%15s", code);
+    FLUSH_STDIN();
 
     memset(&pkt, 0, sizeof(pkt));
     pkt.type = 22;
     strncpy(pkt.data, code, sizeof(pkt.data) - 1);
     send(sock, (char *)&pkt, sizeof(pkt), 0);
 
-    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.file_pk == 1) {
+    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.file_pk == 1)
+    {
         printf("  [Success] 이메일 인증 성공!\n");
         return 1;
     }
@@ -105,11 +159,13 @@ int request_auth(int sock, int type, const char *id, const char *plain_pwd, cons
     req.type = type;
     strncpy(req.id, id, sizeof(req.id) - 1);
     hash_password(plain_pwd, req.pwd_hash);
-    if (name) strncpy(req.name, name, sizeof(req.name) - 1);
+    if (name)
+        strncpy(req.name, name, sizeof(req.name) - 1);
     send(sock, (char *)&req, sizeof(req), 0);
 
     struct AuthResponse res;
-    if (recv_all(sock, (char *)&res, sizeof(res)) <= 0) return -1;
+    if (recv_all(sock, (char *)&res, sizeof(res)) <= 0)
+        return -1;
     return res.user_pk;
 }
 
@@ -122,7 +178,12 @@ int upload_file(int sock, int user_pk, const char *filename)
     int file_pk = -1;
 
     FILE *fp = fopen(filename, "rb");
-    if (!fp) { printf("  [Error] 파일 없음: %s\n", filename); free(pkt); return -1; }
+    if (!fp)
+    {
+        printf("  [Error] 파일 없음: %s\n", filename);
+        free(pkt);
+        return -1;
+    }
 
     fseek(fp, 0, SEEK_END);
     long fsize = ftell(fp);
@@ -134,25 +195,33 @@ int upload_file(int sock, int user_pk, const char *filename)
     pkt->file_size = fsize;
     send(sock, (char *)pkt, sizeof(*pkt), 0);
 
-    if (recv_all(sock, (char *)pkt, sizeof(*pkt)) > 0) {
+    if (recv_all(sock, (char *)pkt, sizeof(*pkt)) > 0)
+    {
         file_pk = pkt->file_pk;
-        if (file_pk == -1) {
+        if (file_pk == -1)
+        {
             printf("  [Error] 업로드 거부 (용량 초과 등)\n");
-            free(pkt); fclose(fp); return -1;
+            free(pkt);
+            fclose(fp);
+            return -1;
         }
         printf("  전송 중: ");
-        while (1) {
+        while (1)
+        {
             memset(pkt, 0, sizeof(*pkt));
-            pkt->type    = PKT_REQ_UPLOAD_CHUNK;
+            pkt->type = PKT_REQ_UPLOAD_CHUNK;
             pkt->user_pk = user_pk;
             pkt->file_pk = file_pk;
             size_t rb = fread(pkt->data, 1, 8192, fp);
-            if (rb > 0) {
+            if (rb > 0)
+            {
                 pkt->data_size = (int)rb;
                 send(sock, (char *)pkt, sizeof(*pkt), 0);
-                printf("#"); fflush(stdout);
+                printf("#");
+                fflush(stdout);
             }
-            if (feof(fp)) break;
+            if (feof(fp))
+                break;
             usleep(10000);
         }
         fclose(fp);
@@ -176,34 +245,58 @@ void download_file(int sock, int user_pk, int file_pk, const char *save_path, co
 {
     struct FilePacket *pkt = (struct FilePacket *)malloc(sizeof(struct FilePacket));
     memset(pkt, 0, sizeof(*pkt));
-    pkt->type    = PKT_REQ_DOWNLOAD_START;
+    pkt->type = PKT_REQ_DOWNLOAD_START;
     pkt->user_pk = user_pk;
     pkt->file_pk = file_pk;
     send(sock, (char *)pkt, sizeof(*pkt), 0);
 
-    if (recv_all(sock, (char *)pkt, sizeof(*pkt)) <= 0) {
-        printf("  [Error] 서버 연결 끊김\n"); free(pkt); return;
+    if (recv_all(sock, (char *)pkt, sizeof(*pkt)) <= 0)
+    {
+        printf("  [Error] 서버 연결 끊김\n");
+        free(pkt);
+        return;
     }
 
     long total = pkt->file_size, received = 0;
-    if (total == 0) { printf("  [Error] 파일 없음\n"); free(pkt); return; }
+    if (total == 0)
+    {
+        printf("  [Error] 파일 없음\n");
+        free(pkt);
+        return;
+    }
 
     FILE *fp = fopen(save_path, "wb");
-    if (!fp) { fp = fopen(filename, "wb"); if (!fp) { free(pkt); return; } }
+    if (!fp)
+    {
+        fp = fopen(filename, "wb");
+        if (!fp)
+        {
+            free(pkt);
+            return;
+        }
+    }
 
     printf("  다운로드 중 (%ld bytes)...\n", total);
-    while (received < total) {
-        if (recv_all(sock, (char *)pkt, sizeof(*pkt)) <= 0) {
-            fclose(fp); remove(save_path); free(pkt); return;
+    while (received < total)
+    {
+        if (recv_all(sock, (char *)pkt, sizeof(*pkt)) <= 0)
+        {
+            fclose(fp);
+            remove(save_path);
+            free(pkt);
+            return;
         }
-        if (pkt->type == PKT_RES_DOWNLOAD_DATA) {
+        if (pkt->type == PKT_RES_DOWNLOAD_DATA)
+        {
             fwrite(pkt->data, 1, pkt->data_size, fp);
             received += pkt->data_size;
-            printf("\r  [%ld / %ld]", received, total); fflush(stdout);
+            printf("\r  [%ld / %ld]", received, total);
+            fflush(stdout);
         }
     }
     printf("\n  [Success] 다운로드 완료!\n");
-    fclose(fp); free(pkt);
+    fclose(fp);
+    free(pkt);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -211,7 +304,8 @@ void download_file(int sock, int user_pk, int file_pk, const char *save_path, co
 // ═══════════════════════════════════════════════════════════
 void menu_file(int sock, int user_pk)
 {
-    while (1) {
+    while (1)
+    {
         CLEAR();
         printf("  ╔══════════════════════════════════╗\n");
         printf("  ║     📂  파일 (File)               ║\n");
@@ -225,39 +319,62 @@ void menu_file(int sock, int user_pk)
         printf("  선택: ");
 
         int ch;
-        if (scanf("%d", &ch) != 1) { FLUSH_STDIN(); continue; }
+        if (scanf("%d", &ch) != 1)
+        {
+            FLUSH_STDIN();
+            continue;
+        }
         FLUSH_STDIN();
 
-        if (ch == 0) { CLEAR(); return; }
+        if (ch == 0)
+        {
+            CLEAR();
+            return;
+        }
 
         CLEAR();
-        if (ch == 1) {
+        if (ch == 1)
+        {
             char path[256];
             printf("  업로드할 파일 경로: ");
-            scanf("%255s", path); FLUSH_STDIN();
+            scanf("%255s", path);
+            FLUSH_STDIN();
             upload_file(sock, user_pk, path);
             PAUSE();
         }
-        else if (ch == 2) {
-            int fpk; char fname[256], spath[512];
-            printf("  파일 PK: "); scanf("%d", &fpk); FLUSH_STDIN();
-            printf("  저장 파일명: "); scanf("%255s", fname); FLUSH_STDIN();
+        else if (ch == 2)
+        {
+            int fpk;
+            char fname[256], spath[512];
+            printf("  파일 PK: ");
+            scanf("%d", &fpk);
+            FLUSH_STDIN();
+            printf("  저장 파일명: ");
+            scanf("%255s", fname);
+            FLUSH_STDIN();
             get_default_download_path(fname, spath);
             printf("  저장 위치: %s\n", spath);
             download_file(sock, user_pk, fpk, spath, fname);
             PAUSE();
         }
-        else if (ch == 3) {
+        else if (ch == 3)
+        {
             printf("  [System] 파일 목록 조회 (미구현)\n");
             PAUSE();
         }
-        else if (ch == 4) {
+        else if (ch == 4)
+        {
             int dpk;
-            printf("  삭제할 파일 PK: "); scanf("%d", &dpk); FLUSH_STDIN();
-            printf("  [System] 삭제 요청 (미구현)\n");
+            printf("  삭제할 파일 PK: ");
+            scanf("%d", &dpk);
+            FLUSH_STDIN();
+
+            // 💡 새로 추가한 삭제 함수 호출
+            delete_file(sock, user_pk, dpk);
             PAUSE();
         }
-        else {
+        else
+        {
             printf("  [Error] 0~4 중 선택하세요.\n");
             PAUSE();
         }
@@ -269,8 +386,10 @@ void menu_file(int sock, int user_pk)
 // ═══════════════════════════════════════════════════════════
 void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
 {
-    (void)sock; (void)user_pk;
-    while (1) {
+    (void)sock;
+    (void)user_pk;
+    while (1)
+    {
         CLEAR();
         printf("  ╔══════════════════════════════════╗\n");
         printf("  ║     ⚙️   설정 (Settings)          ║\n");
@@ -286,27 +405,39 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
         printf("  선택: ");
 
         int ch;
-        if (scanf("%d", &ch) != 1) { FLUSH_STDIN(); continue; }
+        if (scanf("%d", &ch) != 1)
+        {
+            FLUSH_STDIN();
+            continue;
+        }
         FLUSH_STDIN();
 
-        if (ch == 0) { CLEAR(); return; }
+        if (ch == 0)
+        {
+            CLEAR();
+            return;
+        }
 
         CLEAR();
-        if (ch == 1 || ch == 2 || ch == 3) {
+        if (ch == 1 || ch == 2 || ch == 3)
+        {
             printf("  [System] 해당 기능은 준비 중입니다.\n");
             PAUSE();
         }
-        else if (ch == 4) {
+        else if (ch == 4)
+        {
             printf("  [경고] 계정 탈퇴 시 모든 파일이 삭제됩니다.\n");
             printf("  [System] 폴더 삭제 (미구현)\n");
             PAUSE();
         }
-        else if (ch == 5) {
+        else if (ch == 5)
+        {
             printf("  [System] 로그아웃 합니다.\n");
             *should_logout = 1;
             return;
         }
-        else {
+        else
+        {
             printf("  [Error] 0~5 중 선택하세요.\n");
             PAUSE();
         }
@@ -319,7 +450,8 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
 // ═══════════════════════════════════════════════════════════
 void menu_hub(int sock, int user_pk, const char *email)
 {
-    while (1) {
+    while (1)
+    {
         CLEAR();
         int unread = msg_get_unread();
 
@@ -343,33 +475,43 @@ void menu_hub(int sock, int user_pk, const char *email)
         printf("  선택: ");
 
         int ch;
-        if (scanf("%d", &ch) != 1) { FLUSH_STDIN(); continue; }
-        FLUSH_STDIN();   // ← 버퍼 완전 비우기 → 서브메뉴 오입력 원천 차단
+        if (scanf("%d", &ch) != 1)
+        {
+            FLUSH_STDIN();
+            continue;
+        }
+        FLUSH_STDIN(); // ← 버퍼 완전 비우기 → 서브메뉴 오입력 원천 차단
 
-        if (ch == 1) {
-            msg_run_menu();   // MsgClientLogic.hpp → menu_message() 호출
+        if (ch == 1)
+        {
+            msg_run_menu(); // MsgClientLogic.hpp → menu_message() 호출
             CLEAR();
         }
-        else if (ch == 2) {
+        else if (ch == 2)
+        {
             menu_file(sock, user_pk);
         }
-        else if (ch == 3) {
+        else if (ch == 3)
+        {
             int logout = 0;
             menu_settings(sock, user_pk, email, &logout);
-            if (logout) {
+            if (logout)
+            {
                 CLEAR();
                 printf("  [System] 로그아웃 완료. 안녕히 가세요!\n\n");
                 msg_cleanup();
                 return;
             }
         }
-        else if (ch == 4) {
+        else if (ch == 4)
+        {
             CLEAR();
             printf("  [System] 프로그램을 종료합니다. 안녕히 가세요!\n\n");
             msg_cleanup();
             return;
         }
-        else {
+        else
+        {
             printf("  [Error] 1~4 중 선택하세요.\n");
             PAUSE();
         }
@@ -385,10 +527,11 @@ int main()
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
-    addr.sin_port   = htons(9000);
+    addr.sin_port = htons(9000);
     inet_pton(AF_INET, target_ip, &addr.sin_addr);
 
-    if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+    {
         perror("[Error] 서버 연결 실패");
         return -1;
     }
@@ -396,12 +539,13 @@ int main()
     CLEAR();
     printf("  [System] 서버(%s) 접속 성공!\n\n", target_ip);
 
-    int  user_pk = -1;
+    int user_pk = -1;
     char email[64] = {0};
-    char pw[32]    = {0};
+    char pw[32] = {0};
 
     // ── 인증 루프 ────────────────────────────────────────────
-    while (user_pk <= 0) {
+    while (user_pk <= 0)
+    {
         CLEAR();
         printf("  ╔══════════════════════════════════╗\n");
         printf("  ║      ☁️  OUR CLOUD SERVER         ║\n");
@@ -413,36 +557,61 @@ int main()
         printf("  선택: ");
 
         int choice;
-        if (scanf("%d", &choice) != 1) { FLUSH_STDIN(); continue; }
+        if (scanf("%d", &choice) != 1)
+        {
+            FLUSH_STDIN();
+            continue;
+        }
         FLUSH_STDIN();
 
         CLEAR();
-        if (choice == 0) { close(sock); return 0; }
+        if (choice == 0)
+        {
+            close(sock);
+            return 0;
+        }
 
-        if (choice == 2) {
+        if (choice == 2)
+        {
             printf("  ── 회원가입 ──────────────────────────\n");
-            if (handle_email_auth(sock, email)) {
+            if (handle_email_auth(sock, email))
+            {
                 char username[10] = {0};
-                printf("  이름: "); scanf("%9s", username); FLUSH_STDIN();
-                printf("  비밀번호: "); scanf("%31s", pw); FLUSH_STDIN();
+                printf("  이름: ");
+                scanf("%9s", username);
+                FLUSH_STDIN();
+                printf("  비밀번호: ");
+                scanf("%31s", pw);
+                FLUSH_STDIN();
                 int pk = request_auth(sock, PKT_REQ_REGISTER, email, pw, username);
-                if (pk > 0) {
+                if (pk > 0)
+                {
                     user_pk = pk;
                     printf("  [Success] 가입 성공! (ID: %d)\n", user_pk);
-                } else {
+                }
+                else
+                {
                     printf("  [Error] 이미 가입된 이메일이거나 서버 오류\n");
                 }
             }
             PAUSE();
         }
-        else if (choice == 1) {
+        else if (choice == 1)
+        {
             printf("  ── 로그인 ────────────────────────────\n");
-            printf("  이메일: "); scanf("%63s", email); FLUSH_STDIN();
-            printf("  비밀번호: "); scanf("%31s", pw); FLUSH_STDIN();
+            printf("  이메일: ");
+            scanf("%63s", email);
+            FLUSH_STDIN();
+            printf("  비밀번호: ");
+            scanf("%31s", pw);
+            FLUSH_STDIN();
             user_pk = request_auth(sock, PKT_REQ_LOGIN, email, pw, "");
-            if (user_pk > 0) {
+            if (user_pk > 0)
+            {
                 printf("  [Success] 로그인 성공!\n");
-            } else {
+            }
+            else
+            {
                 printf("  [Error] 이메일 또는 비밀번호가 틀렸습니다.\n");
                 user_pk = -1;
             }
@@ -452,7 +621,7 @@ int main()
 
     // ── 메시지 서버 연결 ─────────────────────────────────────
     CLEAR();
-    if (msg_init(user_pk) == 0)
+    if (msg_init(user_pk, email) == 0) // 💡 email 인자 추가
         printf("  [System] 메시지 서버 연결 성공!\n");
     else
         printf("  [System] 메시지 서버 연결 실패 (메시지 기능 비활성화)\n");

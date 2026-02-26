@@ -61,7 +61,37 @@ typedef enum
     PKT_REQ_EMAIL_AUTH = 20,   // 클라이언트 -> 서버: "이 주소로 메일 보내줘"
     PKT_RES_EMAIL_AUTH = 21,   // 서버 -> 클라이언트: "메일 보냈어(성공/실패)"
     PKT_REQ_EMAIL_VERIFY = 22, // 클라이언트 -> 서버: "내가 입력한 번호(123456) 맞니?"
-    PKT_RES_EMAIL_VERIFY = 23  // 서버 -> 클라이언트: "번호 맞다/틀리다"
+    PKT_RES_EMAIL_VERIFY = 23,  // 서버 -> 클라이언트: "번호 맞다/틀리다"
+
+        // --- 파일 관리 확장 (40~46) ---
+    PKT_REQ_LIST = 40,          // 목록 요청
+    PKT_RES_LIST = 41,          // 목록 응답 (개별 파일 정보)
+    PKT_RES_LIST_END = 42,      // 목록 응답 완료
+    PKT_REQ_DELETE = 43,        // 단일 파일 삭제
+    PKT_RES_DELETE = 44,        // 삭제 결과
+    PKT_REQ_DELETE_FOLDER = 45, // 폴더 전체 삭제
+    PKT_RES_DELETE_FOLDER = 46, // 폴더 삭제 결과
+
+    // --- 관리자 기능 (90~99) ---
+    // PKT_REQ_ADMIN_BAN = 91,  // 유저 차단
+    PKT_RES_HANDSHAKE = 100, // 접속 직후 서버가 내려주는 최초 헤더
+
+    PKT_REQ_FILE_LIST = 110,   // 파일 목록 요청
+    PKT_RES_FILE_LIST = 111,   // 파일 목록 응답
+    PKT_REQ_DELETE_FILE = 112, // 특정 파일 삭제 요청
+    PKT_RES_DELETE_FILE = 113, // 삭제 결과 응답
+
+    PKT_REQ_ADMIN_NOTICE = 200, // 공지 발송 요청
+    PKT_REQ_ADMIN_BAN = 201,    // 유저 차단 요청
+    PKT_REQ_ADMIN_RESET = 202,  // 서버 초기화 요청
+    PKT_REQ_ADMIN_USAGE = 203,  // (기존 92번을 203으로 통합)
+
+    PKT_REQ_USER_SETTINGS = 300, // 클라 -> 서버: 개인 설정 변경 요청
+    PKT_RES_USER_SETTINGS = 301, // 서버 -> 클라: 설정 변경 결과
+
+    PKT_REQ_STORAGE_INFO = 310, // 용량 정보 요청
+    PKT_RES_STORAGE_INFO = 311  // 용량 정보 응답
+
 } PacketType;
 
 /* 6. 패킷 구조체 (1바이트 정렬) */
@@ -103,5 +133,25 @@ struct AuthResponse
 {
     int16_t type;    // PKT_RES_REGISTER 또는 PKT_RES_LOGIN
     int32_t user_pk; // 성공 시 발급/조회된 고유 PK (실패 시 -1)
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct AdminPacket     // 관리자가 서버로 명령을 보낼 때 사용할 구조체
+{
+    int16_t type;      // 위에서 정의한 200, 201, 202 중 하나
+    int32_t admin_pk;  // 요청하는 사람의 PK (보안 검증용, 무조건 1이어야 함)
+    int32_t target_pk; // 차단할 대상 유저의 PK (차단 기능에서만 사용)
+    char data[256];    // 공지사항 메시지 등 문자열 데이터
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct UserSettingsPacket
+{
+    int16_t type;         // PKT_REQ_USER_SETTINGS
+    int32_t user_pk;      // 변경을 요청하는 유저의 PK
+    int32_t setting_type; // 1: 이름 변경, 2: 비밀번호 변경
+    char new_data[65];    // 새 이름, 또는 해시화된 새 비밀번호
 };
 #pragma pack(pop)
