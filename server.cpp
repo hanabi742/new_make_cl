@@ -285,7 +285,7 @@ void handle_client(int client_sock, string client_ip, AuthManager &auth, Storage
                 case PKT_REQ_ADMIN_NOTICE:
                 {
                     AdminPacket *admin_pkt = (AdminPacket *)packet;
-                    if (admin_pkt->admin_pk == 1)
+                    if (admin_pkt->admin_pk == 8)
                     {
                         admin.sendGlobalNotice(admin_pkt->data);
                     }
@@ -295,7 +295,7 @@ void handle_client(int client_sock, string client_ip, AuthManager &auth, Storage
                 case PKT_REQ_ADMIN_BAN:
                 {
                     AdminPacket *admin_pkt = (AdminPacket *)packet; //
-                    if (admin_pkt->admin_pk == 1)
+                    if (admin_pkt->admin_pk == 8)
                     {
                         admin.banUser(admin_pkt->target_pk);
                     }
@@ -305,7 +305,7 @@ void handle_client(int client_sock, string client_ip, AuthManager &auth, Storage
                 case PKT_REQ_ADMIN_RESET:
                 {
                     AdminPacket *admin_pkt = (AdminPacket *)packet;
-                    if (admin_pkt->admin_pk == 1)
+                    if (admin_pkt->admin_pk == 8)
                     {
                         admin.resetSystem();
                     }
