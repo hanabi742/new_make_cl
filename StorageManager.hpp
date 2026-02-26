@@ -204,7 +204,7 @@ public:
     }
 
     // ── [요건 4] 파일이 PK 폴더로 자동 이동되는지 ──
-    bool moveFileToFinal(int user_pk, int file_pk, const std::string &original_name, size_t file_size)
+    bool moveFileToFinal(int user_pk, int file_pk, const std::string &original_name, size_t file_size, int *out_db_file_pk = nullptr)
     {
         std::lock_guard<std::mutex> lock(mtx);
         fs::path src = uploading_root / std::to_string(user_pk) / (std::to_string(file_pk) + ".tmp");

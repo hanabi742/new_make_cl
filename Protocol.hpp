@@ -137,6 +137,17 @@ struct AuthResponse
 #pragma pack(pop)
 
 #pragma pack(push, 1)
+struct ServerHandshakeHeader    // 서버 접속 직후 클라이언트가 무조건 처음 받게 되는 헤더 패킷
+{
+    int16_t type;               // 항상 PKT_RES_HANDSHAKE (100)
+    float server_version;       // 서버의 현재 버전 (예: 1.2)
+    int32_t current_users;      // 현재 접속자 수
+    int32_t max_users;          // 서버 최대 수용 인원
+    int32_t next_port;          // 포트 변경이 예정되어 있다면 해당 포트 번호 (없으면 0)
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
 struct AdminPacket     // 관리자가 서버로 명령을 보낼 때 사용할 구조체
 {
     int16_t type;      // 위에서 정의한 200, 201, 202 중 하나
