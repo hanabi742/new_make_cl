@@ -9,6 +9,7 @@
 #include "AuthManager.hpp"
 #include "StorageManager.hpp"
 #include "MsgServerLogic.hpp" // 메시지 서버 (포트 9001)
+#include "AdminManager.hpp"
 
 using namespace std;
 using namespace std::filesystem;
@@ -35,6 +36,10 @@ int main()
     StorageManager storage;
     storage.initStorage();
     cout << "[Server] 저장소 준비 완료!" << endl;
+
+    // [추가] UserManager와 AdminManager 생성 (의존성 주입)
+    UserManager user_mgr(auth, storage);
+    AdminManager admin(auth, storage);
 
     // 메시지 서버 별도 스레드로 실행 (포트 9001)
     thread([]
@@ -282,6 +287,58 @@ int main()
             send(client_sock, (char *)&res, sizeof(AuthResponse), 0);
             break;
         }
+
+
+        case PKT_REQ_ADMIN_NOTICE:
+            {
+                AdminPacket *admin_pkt = (AdminPacket *)packet;
+                if (admin_pkt->admin_pk == 1)
+                {
+                    admin.sendGlobalNotice(admin_pkt->data);
+                }
+                break;
+            }
+
+            case PKT_REQ_ADMIN_BAN:
+            {
+                AdminPacket *admin_pkt = (AdminPacket *)packet; //
+                if (admin_pkt->admin_pk == 1)
+                {
+                    admin.banUser(admin_pkt->target_pk);
+                }
+                break;
+            }
+
+            case PKT_REQ_ADMIN_RESET:
+            {
+                AdminPacket *admin_pkt = (AdminPacket *)packet;
+                if (admin_pkt->admin_pk == 1)
+                {
+                    admin.resetSystem();
+                }
+                break;
+            }
+
+            case PKT_REQ_USER_SETTINGS:
+            {
+                UserSettingsPacket *req = (UserSettingsPacket *)packet;
+                bool success = false;
+
+                if (req->setting_type == 1)
+                {
+                    success = user_mgr.updateUserName(req->user_pk, req->new_data);
+                }
+                else if (req->setting_type == 2)
+                {
+                    success = user_mgr.updateUserPassword(req->user_pk, req->new_data);
+                }
+
+                FilePacket res = {};
+                res.type = PKT_RES_USER_SETTINGS;
+                res.file_pk = success ? 1 : -1;
+                send(client_sock, (char *)&res, sizeof(FilePacket), 0);
+                break;
+            }
 
         default:
             break;
