@@ -35,6 +35,24 @@
     } while (0)
 
 // ═══════════════════════════════════════════════════════════
+//  [핵심 수정] 함수 전방 선언 (forward declaration)
+//
+//  이전 코드의 연동 불가 원인:
+//  C는 함수를 호출하는 시점에 그 함수가 이미 선언/정의되어
+//  있어야 한다. menu_settings()가 menu_personal_settings()를
+//  호출하는데, menu_personal_settings()가 아래에 정의되어
+//  있어서 컴파일러가 인식하지 못했다.
+//  → 아래처럼 전방 선언을 추가하면 해결된다.
+// ═══════════════════════════════════════════════════════════
+static void menu_personal_default_email(int sock, int user_pk, const char *login_email);
+static void menu_personal_change_pw(int sock, int user_pk);
+static void menu_personal_change_name(int sock, int user_pk);
+static void menu_personal_settings(int sock, int user_pk, const char *login_email);
+void menu_file(int sock, int user_pk);
+void menu_settings(int sock, int user_pk, const char *email, int *should_logout);
+void menu_hub(int sock, int user_pk, const char *email);
+
+// ═══════════════════════════════════════════════════════════
 //  네트워크 헬퍼
 // ═══════════════════════════════════════════════════════════
 int recv_all(int sock, char *buf, int size)
@@ -64,6 +82,7 @@ void get_default_download_path(const char *filename, char *out_path)
         strcpy(out_path, filename);
 }
 
+// SHA-256 해싱 — 요구사항 7: 서버에 평문 비밀번호 전달 금지
 void hash_password(const char *plain, char *out)
 {
     unsigned char hash[SHA256_DIGEST_LENGTH];
@@ -109,13 +128,13 @@ int handle_email_auth(int sock, char *out_email)
     char code[16];
     struct FilePacket pkt;
 
-    // [수정] ERD: ID VARCHAR(25) → 최대 25자 입력 제한
+    // ERD: ID VARCHAR(25) → 최대 25자 입력 제한
     printf("  이메일 주소 (최대 25자): ");
     scanf("%25s", out_email);
     FLUSH_STDIN();
 
     memset(&pkt, 0, sizeof(pkt));
-    pkt.type = 20;
+    pkt.type = PKT_REQ_EMAIL_AUTH;
     strncpy(pkt.data, out_email, sizeof(pkt.data) - 1);
     send(sock, (char *)&pkt, sizeof(pkt), 0);
 
@@ -131,7 +150,7 @@ int handle_email_auth(int sock, char *out_email)
     FLUSH_STDIN();
 
     memset(&pkt, 0, sizeof(pkt));
-    pkt.type = 22;
+    pkt.type = PKT_REQ_EMAIL_VERIFY;
     strncpy(pkt.data, code, sizeof(pkt.data) - 1);
     send(sock, (char *)&pkt, sizeof(pkt), 0);
 
@@ -362,11 +381,17 @@ void menu_file(int sock, int user_pk)
 // ═══════════════════════════════════════════════════════════
 // [추가] 개인 설정 — 기본 이메일 설정
 //
-// ERD: DEFAULT_EMAIL VARCHAR(64) → 64자 초과 입력 차단
-//      ID VARCHAR(25) → 로그인 이메일 최대 25자
+// 호출 경로:
+//   main → menu_hub(ch=3) → menu_settings(ch=1)
+//        → menu_personal_settings(ch=2) → 여기
 //
-// PKT_REQ_UPDATE_EMAIL 패킷으로 서버에 요청.
-// AuthPacket.id 필드에 새 기본 이메일을 담아 전송.
+// 흐름:
+//   1. PKT_REQ_GET_USER_INFO → 서버에서 현재 기본이메일 받아서 화면에 표시
+//   2. 새 이메일 입력 + 유효성 검사 (@ 포함, 64자 이하)
+//   3. PKT_REQ_UPDATE_EMAIL → 서버 DB 업데이트 요청
+//   4. 결과 표시
+//
+// ERD: DEFAULT_EMAIL VARCHAR(64)
 // ═══════════════════════════════════════════════════════════
 static void menu_personal_default_email(int sock, int user_pk, const char *login_email)
 {
@@ -375,7 +400,7 @@ static void menu_personal_default_email(int sock, int user_pk, const char *login
     printf("  ║     📧  기본 이메일 설정                 ║\n");
     printf("  ╠══════════════════════════════════════════╣\n");
 
-    // ── 서버에서 현재 기본 이메일 조회 ──────────────────────
+    // ── 1. 서버에서 현재 기본 이메일 조회 ────────────────────
     struct AuthPacket info_req;
     memset(&info_req, 0, sizeof(info_req));
     info_req.type    = PKT_REQ_GET_USER_INFO;
@@ -385,15 +410,14 @@ static void menu_personal_default_email(int sock, int user_pk, const char *login
     struct AuthResponse info_res;
     memset(&info_res, 0, sizeof(info_res));
 
-    // [수정] ERD: DEFAULT_EMAIL VARCHAR(64) → 버퍼 65바이트
-    char current_default[65] = {0};
+    char current_default[65] = {0}; // ERD: DEFAULT_EMAIL VARCHAR(64)
 
     if (recv_all(sock, (char *)&info_res, sizeof(info_res)) > 0 && info_res.user_pk > 0)
     {
         if (strlen(info_res.default_email) > 0)
             strncpy(current_default, info_res.default_email, 64);
         else
-            strncpy(current_default, login_email, 64); // 미설정 시 로그인 이메일 표시
+            strncpy(current_default, login_email, 64); // 미설정이면 로그인 이메일 표시
     }
     else
     {
@@ -408,50 +432,45 @@ static void menu_personal_default_email(int sock, int user_pk, const char *login
     printf("  ╚══════════════════════════════════════════╝\n");
     printf("  새 이메일: ");
 
-    // [수정] ERD: DEFAULT_EMAIL VARCHAR(64) → 최대 64자 입력
-    char new_email[65] = {0};
+    // ── 2. 새 이메일 입력 ─────────────────────────────────────
+    char new_email[65] = {0}; // ERD: DEFAULT_EMAIL VARCHAR(64) + 널
     if (fgets(new_email, sizeof(new_email), stdin) == NULL) return;
 
     size_t len = strlen(new_email);
-    if (len > 0 && new_email[len - 1] == '\n') new_email[len - 1] = '\0';
+    if (len > 0 && new_email[len - 1] == '\n')
+        new_email[len - 1] = '\0';
+    else if (len == 64) // 버퍼 꽉 참 → 64자 초과 입력
+    {
+        FLUSH_STDIN();
+        printf("  [Error] 이메일은 최대 64자까지 입력 가능합니다.\n");
+        PAUSE();
+        return;
+    }
 
-    // 빈 입력이면 취소
-    if (strlen(new_email) == 0)
+    if (strlen(new_email) == 0) // Enter만 누르면 취소
     {
         printf("  [System] 취소되었습니다.\n");
         PAUSE();
         return;
     }
 
-    // '@' 포함 여부 간단 유효성 검사
-    if (strchr(new_email, '@') == NULL)
+    if (strchr(new_email, '@') == NULL) // '@' 유효성 검사
     {
-        printf("  [Error] 올바른 이메일 형식이 아닙니다. ('@' 필요)\n");
+        printf("  [Error] 올바른 이메일 형식이 아닙니다. ('@' 포함 필요)\n");
         PAUSE();
         return;
     }
 
-    // [수정] ERD: DEFAULT_EMAIL VARCHAR(64) → 64자 초과 차단
-    if (strlen(new_email) > 64)
-    {
-        printf("  [Error] 이메일은 최대 64자까지 입력 가능합니다. (ERD 제한)\n");
-        PAUSE();
-        return;
-    }
-
-    // ── 서버로 기본 이메일 변경 요청 전송 ───────────────────
+    // ── 3. 서버에 기본 이메일 변경 요청 ──────────────────────
     struct AuthPacket req;
     memset(&req, 0, sizeof(req));
     req.type    = PKT_REQ_UPDATE_EMAIL;
     req.user_pk = user_pk;
-    // [수정] ERD: ID VARCHAR(25)이지만 기본이메일은 DEFAULT_EMAIL(64)에 저장됨
-    //        AuthPacket.id 필드 대신 AuthPacket.name 등 여유 필드를 사용하거나
-    //        id 필드 크기를 65로 조정 필요 → Protocol.hpp 수정 가이드 참고
-    strncpy(req.id, new_email, sizeof(req.id) - 1);
-
+    // new_email 필드에 새 기본이메일 저장 (Protocol.hpp의 AuthPacket.new_email)
+    strncpy(req.new_email, new_email, sizeof(req.new_email) - 1);
     send(sock, (char *)&req, sizeof(req), 0);
 
-    // ── 서버 응답 수신 ───────────────────────────────────────
+    // ── 4. 서버 응답 수신 및 결과 표시 ───────────────────────
     struct AuthResponse res;
     memset(&res, 0, sizeof(res));
 
@@ -471,14 +490,19 @@ static void menu_personal_default_email(int sock, int user_pk, const char *login
 // ═══════════════════════════════════════════════════════════
 // [추가] 개인 설정 — 비밀번호 변경
 //
-// ERD: PW VARCHAR(64) → SHA-256 hex(64자)와 일치
-// 현재 PW 검증 후 새 PW로 교체.
-// 클라이언트에서 SHA-256 해싱 후 전송 (요구사항 7).
+// 호출 경로:
+//   main → menu_hub(ch=3) → menu_settings(ch=1)
+//        → menu_personal_settings(ch=3) → 개인정보변경(ch=1) → 여기
 //
-// 비밀번호 조건 (요구사항 3-1):
-//   - 8자 이상
-//   - 영문자 + 숫자 혼합
-//   - 비밀번호 확인 일치
+// 흐름:
+//   1. 현재 비밀번호 입력
+//   2. 새 비밀번호 입력 + 조건 검사 (8자↑, 영문+숫자)
+//   3. 새 비밀번호 확인 (요구사항 3-1)
+//   4. 클라이언트에서 SHA-256 해싱 (요구사항 7)
+//   5. PKT_REQ_UPDATE_PW → 서버 DB 업데이트 요청
+//   6. 결과 표시
+//
+// ERD: PW VARCHAR(64) — SHA-256 hex(64자)와 정확히 일치
 // ═══════════════════════════════════════════════════════════
 static void menu_personal_change_pw(int sock, int user_pk)
 {
@@ -486,22 +510,23 @@ static void menu_personal_change_pw(int sock, int user_pk)
     printf("  ╔══════════════════════════════════════════╗\n");
     printf("  ║     🔒  비밀번호 변경                    ║\n");
     printf("  ╠══════════════════════════════════════════╣\n");
-    printf("  ║  조건: 8자 이상, 영문+숫자 혼합          ║\n");
+    printf("  ║  조건: 8자 이상, 영문자 + 숫자 혼합      ║\n");
     printf("  ╚══════════════════════════════════════════╝\n");
 
-    char old_plain[64]    = {0};
-    char new_plain[64]    = {0};
-    char new_confirm[64]  = {0};
+    char old_plain[64]   = {0};
+    char new_plain[64]   = {0};
+    char new_confirm[64] = {0};
 
+    // ── 1. 현재 비밀번호 입력 ─────────────────────────────────
     printf("  현재 비밀번호: ");
     if (fgets(old_plain, sizeof(old_plain), stdin) == NULL) return;
     { size_t l = strlen(old_plain); if (l > 0 && old_plain[l-1] == '\n') old_plain[l-1] = '\0'; }
 
+    // ── 2. 새 비밀번호 입력 + 조건 검사 ──────────────────────
     printf("  새 비밀번호  : ");
     if (fgets(new_plain, sizeof(new_plain), stdin) == NULL) return;
     { size_t l = strlen(new_plain); if (l > 0 && new_plain[l-1] == '\n') new_plain[l-1] = '\0'; }
 
-    // ── 비밀번호 조건 검사 (요구사항 3-1) ───────────────────
     if (strlen(new_plain) < 8)
     {
         printf("  [Error] 비밀번호는 최소 8자 이상이어야 합니다.\n");
@@ -518,12 +543,12 @@ static void menu_personal_change_pw(int sock, int user_pk)
     }
     if (!has_alpha || !has_digit)
     {
-        printf("  [Error] 비밀번호는 영문자와 숫자를 모두 포함해야 합니다.\n");
+        printf("  [Error] 영문자와 숫자를 모두 포함해야 합니다.\n");
         PAUSE();
         return;
     }
 
-    // ── 비밀번호 확인 (요구사항 3-1) ────────────────────────
+    // ── 3. 새 비밀번호 확인 ───────────────────────────────────
     printf("  새 비밀번호 확인: ");
     if (fgets(new_confirm, sizeof(new_confirm), stdin) == NULL) return;
     { size_t l = strlen(new_confirm); if (l > 0 && new_confirm[l-1] == '\n') new_confirm[l-1] = '\0'; }
@@ -535,24 +560,22 @@ static void menu_personal_change_pw(int sock, int user_pk)
         return;
     }
 
-    // ── SHA-256 해싱 (요구사항 7: 서버에 평문 전달 금지) ────
+    // ── 4. 클라이언트에서 SHA-256 해싱 (요구사항 7) ──────────
     char old_hash[65] = {0};
     char new_hash[65] = {0};
     hash_password(old_plain, old_hash);
     hash_password(new_plain, new_hash);
 
-    // ── 서버로 비밀번호 변경 요청 전송 ──────────────────────
+    // ── 5. 서버에 비밀번호 변경 요청 ─────────────────────────
     struct AuthPacket req;
     memset(&req, 0, sizeof(req));
     req.type    = PKT_REQ_UPDATE_PW;
     req.user_pk = user_pk;
-    // [수정] ERD: PW VARCHAR(64) → SHA-256 hex 64자 정확히 맞음
-    strncpy(req.pwd_hash,     old_hash, sizeof(req.pwd_hash) - 1);
-    strncpy(req.new_pwd_hash, new_hash, sizeof(req.new_pwd_hash) - 1);
-
+    strncpy(req.pwd_hash,     old_hash, sizeof(req.pwd_hash) - 1);     // 현재 PW 해시 (검증용)
+    strncpy(req.new_pwd_hash, new_hash, sizeof(req.new_pwd_hash) - 1); // 새 PW 해시
     send(sock, (char *)&req, sizeof(req), 0);
 
-    // ── 서버 응답 수신 ───────────────────────────────────────
+    // ── 6. 서버 응답 수신 및 결과 표시 ───────────────────────
     struct AuthResponse res;
     memset(&res, 0, sizeof(res));
 
@@ -574,7 +597,14 @@ static void menu_personal_change_pw(int sock, int user_pk)
 // ═══════════════════════════════════════════════════════════
 // [추가] 개인 설정 — 이름 변경
 //
-// ERD: NAME VARCHAR(5) → 최대 5자 입력 제한
+// 호출 경로:
+//   main → menu_hub(ch=3) → menu_settings(ch=1)
+//        → menu_personal_settings(ch=3) → 개인정보변경(ch=2) → 여기
+//
+// 흐름:
+//   1. 새 이름 입력 (최대 5자 — ERD: NAME VARCHAR(5))
+//   2. PKT_REQ_UPDATE_NAME → 서버 DB 업데이트 요청
+//   3. 결과 표시
 // ═══════════════════════════════════════════════════════════
 static void menu_personal_change_name(int sock, int user_pk)
 {
@@ -582,51 +612,46 @@ static void menu_personal_change_name(int sock, int user_pk)
     printf("  ╔══════════════════════════════════════════╗\n");
     printf("  ║     ✏️   이름 변경                        ║\n");
     printf("  ╠══════════════════════════════════════════╣\n");
-    // [수정] ERD: NAME VARCHAR(5) → 최대 5자임을 사용자에게 안내
     printf("  ║  새 이름을 입력하세요. (최대 5자)        ║\n");
-    printf("  ║  (Enter만 누르면 취소됩니다)             ║\n");
+    printf("  ║  Enter만 누르면 취소됩니다.              ║\n");
     printf("  ╚══════════════════════════════════════════╝\n");
     printf("  새 이름: ");
 
-    // [수정] ERD: NAME VARCHAR(5) → 버퍼 6바이트 (널 포함)
-    char new_name[6] = {0};
+    // ── 1. 새 이름 입력 ───────────────────────────────────────
+    // ERD: NAME VARCHAR(5) → 버퍼 7바이트 (5자 + 줄바꿈 + 널)
+    char new_name[7] = {0};
     if (fgets(new_name, sizeof(new_name), stdin) == NULL) return;
 
     size_t len = strlen(new_name);
-    if (len > 0 && new_name[len - 1] == '\n') new_name[len - 1] = '\0';
-
-    // 빈 입력이면 취소
-    if (strlen(new_name) == 0)
+    if (len > 0 && new_name[len - 1] == '\n')
     {
-        // fgets가 버퍼를 꽉 채운 경우(5자 초과 입력) 나머지를 버퍼에서 제거
+        new_name[len - 1] = '\0'; // 정상 입력 — 줄바꿈 제거
+    }
+    else
+    {
+        // 줄바꿈 없이 버퍼가 찼다 → 5자 초과 입력
         FLUSH_STDIN();
+        printf("  [Error] 이름은 최대 5자까지 입력 가능합니다.\n");
+        PAUSE();
+        return;
+    }
+
+    if (strlen(new_name) == 0) // Enter만 누르면 취소
+    {
         printf("  [System] 취소되었습니다.\n");
         PAUSE();
         return;
     }
 
-    // [수정] ERD: NAME VARCHAR(5) → 5자 초과 시 거부 (fgets로 자동 제한되지만 명시적 검사)
-    if (strlen(new_name) > 5)
-    {
-        FLUSH_STDIN();
-        printf("  [Error] 이름은 최대 5자까지 입력 가능합니다. (ERD 제한)\n");
-        PAUSE();
-        return;
-    }
-
-    // 5자 초과 잔여 입력 버려야 하는 경우를 대비해 버퍼 정리
-    FLUSH_STDIN();
-
-    // ── 서버로 이름 변경 요청 전송 ──────────────────────────
+    // ── 2. 서버에 이름 변경 요청 ──────────────────────────────
     struct AuthPacket req;
     memset(&req, 0, sizeof(req));
     req.type    = PKT_REQ_UPDATE_NAME;
     req.user_pk = user_pk;
     strncpy(req.name, new_name, sizeof(req.name) - 1);
-
     send(sock, (char *)&req, sizeof(req), 0);
 
-    // ── 서버 응답 수신 ───────────────────────────────────────
+    // ── 3. 서버 응답 수신 및 결과 표시 ───────────────────────
     struct AuthResponse res;
     memset(&res, 0, sizeof(res));
 
@@ -645,6 +670,16 @@ static void menu_personal_change_name(int sock, int user_pk)
 
 // ═══════════════════════════════════════════════════════════
 // [추가] 개인 설정 서브메뉴
+//
+// 호출 경로:
+//   main → menu_hub(ch=3) → menu_settings(ch=1) → 여기
+//
+// 선택에 따라:
+//   1 → 서비스 확인/변경 (미구현)
+//   2 → menu_personal_default_email()  ← 기본 이메일 설정
+//   3 → 개인정보 변경 서브메뉴
+//         1 → menu_personal_change_pw()    ← 비밀번호 변경
+//         2 → menu_personal_change_name()  ← 이름 변경
 // ═══════════════════════════════════════════════════════════
 static void menu_personal_settings(int sock, int user_pk, const char *login_email)
 {
@@ -675,10 +710,11 @@ static void menu_personal_settings(int sock, int user_pk, const char *login_emai
         }
         else if (ch == 2)
         {
-            menu_personal_default_email(sock, user_pk, login_email);
+            menu_personal_default_email(sock, user_pk, login_email); // ← 기본 이메일 설정 연결
         }
         else if (ch == 3)
         {
+            // 개인정보 변경 서브메뉴
             while (1)
             {
                 CLEAR();
@@ -686,7 +722,7 @@ static void menu_personal_settings(int sock, int user_pk, const char *login_emai
                 printf("  ║     ✏️   개인정보 변경                    ║\n");
                 printf("  ╠══════════════════════════════════════════╣\n");
                 printf("  ║  1. 비밀번호 변경                       ║\n");
-                printf("  ║  2. 이름 변경 (최대 5자)                ║\n");  // [수정] ERD VARCHAR(5) 안내
+                printf("  ║  2. 이름 변경 (최대 5자)                ║\n");
                 printf("  ║  0. 돌아가기                            ║\n");
                 printf("  ╚══════════════════════════════════════════╝\n");
                 printf("  선택: ");
@@ -699,9 +735,9 @@ static void menu_personal_settings(int sock, int user_pk, const char *login_emai
                 CLEAR();
 
                 if (sub == 1)
-                    menu_personal_change_pw(sock, user_pk);
+                    menu_personal_change_pw(sock, user_pk);    // ← 비밀번호 변경 연결
                 else if (sub == 2)
-                    menu_personal_change_name(sock, user_pk);
+                    menu_personal_change_name(sock, user_pk);  // ← 이름 변경 연결
                 else
                 {
                     printf("  [Error] 0~2 중 선택하세요.\n");
@@ -719,6 +755,9 @@ static void menu_personal_settings(int sock, int user_pk, const char *login_emai
 
 // ═══════════════════════════════════════════════════════════
 //  서브메뉴: ⚙️ 설정
+//
+//  호출 경로: main → menu_hub(ch=3) → 여기
+//  ch==1 → menu_personal_settings() ← 개인설정 연결 핵심
 // ═══════════════════════════════════════════════════════════
 void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
 {
@@ -746,7 +785,7 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
         CLEAR();
 
         if (ch == 1)
-            menu_personal_settings(sock, user_pk, email);  // [수정] 미구현 → 실제 호출
+            menu_personal_settings(sock, user_pk, email); // ← 개인설정 진입 연결
         else if (ch == 2 || ch == 3)
         {
             printf("  [System] 해당 기능은 준비 중입니다.\n");
@@ -774,6 +813,20 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
 
 // ═══════════════════════════════════════════════════════════
 //  허브 메뉴 — 로그인 후 모든 기능의 진입점
+//
+//  전체 메뉴 흐름:
+//  main()
+//   └─ 로그인/회원가입 성공
+//       └─ menu_hub()
+//           ├─ ch=1 → msg_run_menu()          (메시지)
+//           ├─ ch=2 → menu_file()             (파일)
+//           ├─ ch=3 → menu_settings()         (설정)
+//           │          └─ ch=1 → menu_personal_settings()
+//           │                     ├─ ch=2 → menu_personal_default_email()
+//           │                     └─ ch=3 → 개인정보 변경
+//           │                                ├─ ch=1 → menu_personal_change_pw()
+//           │                                └─ ch=2 → menu_personal_change_name()
+//           └─ ch=4 → 종료
 // ═══════════════════════════════════════════════════════════
 void menu_hub(int sock, int user_pk, const char *email)
 {
@@ -811,7 +864,9 @@ void menu_hub(int sock, int user_pk, const char *email)
             CLEAR();
         }
         else if (ch == 2)
+        {
             menu_file(sock, user_pk);
+        }
         else if (ch == 3)
         {
             int logout = 0;
@@ -861,10 +916,10 @@ int main()
     printf("  [System] 서버(%s) 접속 성공!\n\n", target_ip);
 
     int  user_pk = -1;
-    // [수정] ERD: ID VARCHAR(25) → email 버퍼 26바이트면 충분하나 기존 64 유지 (로그인 외에도 사용)
     char email[64] = {0};
     char pw[32]    = {0};
 
+    // ── 인증 루프 ────────────────────────────────────────────
     while (user_pk <= 0)
     {
         CLEAR();
@@ -889,8 +944,7 @@ int main()
             printf("  ── 회원가입 ──────────────────────────\n");
             if (handle_email_auth(sock, email))
             {
-                // [수정] ERD: NAME VARCHAR(5) → 최대 5자 입력
-                char username[6] = {0};
+                char username[6] = {0}; // ERD: NAME VARCHAR(5)
                 printf("  이름 (최대 5자): ");
                 scanf("%5s", username);
                 FLUSH_STDIN();
@@ -911,9 +965,8 @@ int main()
         else if (choice == 1)
         {
             printf("  ── 로그인 ────────────────────────────\n");
-            // [수정] ERD: ID VARCHAR(25) → 최대 25자
             printf("  이메일: ");
-            scanf("%25s", email);
+            scanf("%25s", email); // ERD: ID VARCHAR(25)
             FLUSH_STDIN();
             printf("  비밀번호: ");
             scanf("%31s", pw);
@@ -930,12 +983,14 @@ int main()
         }
     }
 
+    // ── 메시지 서버 연결 ─────────────────────────────────────
     CLEAR();
     if (msg_init(user_pk, email) == 0)
         printf("  [System] 메시지 서버 연결 성공!\n");
     else
         printf("  [System] 메시지 서버 연결 실패 (메시지 기능 비활성화)\n");
 
+    // ── 허브 메뉴 진입 ───────────────────────────────────────
     menu_hub(sock, user_pk, email);
 
     close(sock);
