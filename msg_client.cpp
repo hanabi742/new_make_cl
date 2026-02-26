@@ -4,54 +4,70 @@
 // ============================================================
 #include "MsgClientLogic.hpp"
 #include "msg_client.h"
+#include <string.h>
 
-extern "C" {
+static char g_user_email[64] = {0};
+extern "C"
+{
 
-int msg_init(int user_pk) {
-    if (init_network() < 0) return -1;
+    int msg_init(int user_pk, const char *email)
+    {
+        if (init_network() < 0)
+            return -1;
 
-    g_sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (g_sock == SOCK_INVALID) return -1;
+        g_sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (g_sock == SOCK_INVALID)
+            return -1;
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family      = AF_INET;
-    addr.sin_port        = htons(9001);
-    addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+        struct sockaddr_in addr;
+        memset(&addr, 0, sizeof(addr));
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(9001);
+        addr.sin_addr.s_addr = inet_addr(SERVER_IP);
 
-    if (connect(g_sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        sock_close(g_sock);
-        g_sock = SOCK_INVALID;
-        return -1;
+        if (connect(g_sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+        {
+            sock_close(g_sock);
+            g_sock = SOCK_INVALID;
+            return -1;
+        }
+
+        g_user_pk = user_pk;
+        if (email != NULL)
+        {
+            strncpy(g_user_email, email, sizeof(g_user_email) - 1);
+            g_user_email[sizeof(g_user_email) - 1] = '\0';
+        }
+
+        // 5초 폴링 스레드 시작
+        pthread_t tid;
+        pthread_create(&tid, NULL, alarm_thread, NULL);
+        pthread_detach(tid);
+
+        return 0;
     }
 
-    g_user_pk = user_pk;
-
-    // 5초 폴링 스레드 시작
-    pthread_t tid;
-    pthread_create(&tid, NULL, alarm_thread, NULL);
-    pthread_detach(tid);
-
-    return 0;
-}
-
-int msg_get_unread(void) {
-    lock();
-    int n = g_unread;
-    unlock();
-    return n;
-}
-
-void msg_run_menu(void) {
-    menu_message();
-}
-
-void msg_cleanup(void) {
-    if (g_sock != SOCK_INVALID) {
-        sock_close(g_sock);
-        g_sock = SOCK_INVALID;
+    int msg_get_unread(void)
+    {
+        lock();
+        int n = g_unread;
+        unlock();
+        return n;
     }
-    cleanup_network();
-}
+
+    void msg_run_menu(void)
+    {
+        menu_message();
+    }
+
+    void msg_cleanup(void)
+    {
+        if (g_sock != SOCK_INVALID)
+        {
+            sock_close(g_sock);
+            g_sock = SOCK_INVALID;
+        }
+        cleanup_network();
+    }
 
 } // extern "C"
