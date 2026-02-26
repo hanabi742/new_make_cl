@@ -85,11 +85,16 @@ private:
         }
 
         char safe_id[51];
+        char safe_hash[129];
+        char safe_name[61];
         mysql_real_escape_string(db_conn, safe_id, id.c_str(), id.size());
 
+        //재훈수정
         char query[256];
         snprintf(query, sizeof(query),
-            "SELECT COUNT(*) FROM MEMBERSHIP WHERE ID = '%s'", safe_id);
+        "INSERT INTO MEMBERSHIP (ID, PW, NAME, GRADE, DEFAULT_EMAIL) "
+        "VALUES ('%s', '%s', '%s', '일반', '%s')",
+        safe_id, safe_hash, safe_name, safe_id);
 
         if (mysql_query(db_conn, query))
         {
@@ -438,4 +443,137 @@ public:
             return -1;
         }
     }
+
+    //재훈추가
+    // ===== [개인설정 DB 연동 함수 추가] =====
+static long long quotaBytesForGrade(const std::string& grade) {
+    if (grade == "비지니스") return 200LL * 1024 * 1024;
+    if (grade == "VIP")     return 500LL * 1024 * 1024;
+    if (grade == "VVIP")    return 1LL   * 1024 * 1024 * 1024;
+    return 100LL * 1024 * 1024; // 일반
+}
+
+static int priceForGrade(const std::string& grade) {
+    if (grade == "비지니스") return 100000;
+    if (grade == "VIP")     return 200000;
+    if (grade == "VVIP")    return 300000;
+    return 0; // 일반
+}
+
+static int gradeRank(const std::string& grade) {
+    if (grade == "일반")    return 0;
+    if (grade == "비지니스") return 1;
+    if (grade == "VIP")     return 2;
+    if (grade == "VVIP")    return 3;
+    return -1;
+}
+
+std::string getUserGradeFromDB(int user_pk) {
+    if (!db_conn) return "일반";
+    char query[256];
+    snprintf(query, sizeof(query), "SELECT GRADE FROM MEMBERSHIP WHERE USER_NUM=%d", user_pk);
+    if (mysql_query(db_conn, query)) return "일반";
+
+    MYSQL_RES* res = mysql_store_result(db_conn);
+    if (!res) return "일반";
+    MYSQL_ROW row = mysql_fetch_row(res);
+    std::string grade = (row && row[0] && row[0][0]) ? std::string(row[0]) : "일반";
+    mysql_free_result(res);
+
+    if (gradeRank(grade) < 0) grade = "일반";
+    return grade;
+}
+
+std::string getDefaultEmailFromDB(int user_pk) {
+    if (!db_conn) return "";
+    char query[256];
+    snprintf(query, sizeof(query), "SELECT DEFAULT_EMAIL FROM MEMBERSHIP WHERE USER_NUM=%d", user_pk);
+    if (mysql_query(db_conn, query)) return "";
+
+    MYSQL_RES* res = mysql_store_result(db_conn);
+    if (!res) return "";
+    MYSQL_ROW row = mysql_fetch_row(res);
+    std::string email = (row && row[0] && row[0][0]) ? std::string(row[0]) : "";
+    mysql_free_result(res);
+    return email;
+}
+
+bool updateUserNameInDB(int user_pk, const std::string& new_name) {
+    if (!db_conn) return false;
+    char safe_name[64];
+    mysql_real_escape_string(db_conn, safe_name, new_name.c_str(), new_name.size());
+
+    char query[256];
+    snprintf(query, sizeof(query),
+        "UPDATE MEMBERSHIP SET NAME='%s' WHERE USER_NUM=%d", safe_name, user_pk);
+
+    return (mysql_query(db_conn, query) == 0);
+}
+
+// 비밀번호는 MEMBERSHIP.PW에 저장(해시 문자열)
+bool updateUserPasswordHashInDB(int user_pk, const std::string& new_hash) {
+    if (!db_conn) return false;
+    char safe_hash[140];
+    mysql_real_escape_string(db_conn, safe_hash, new_hash.c_str(), new_hash.size());
+
+    char query[256];
+    snprintf(query, sizeof(query),
+        "UPDATE MEMBERSHIP SET PW='%s' WHERE USER_NUM=%d", safe_hash, user_pk);
+
+    return (mysql_query(db_conn, query) == 0);
+}
+
+bool updateDefaultEmailInDB(int user_pk, const std::string& new_email) {
+    if (!db_conn) return false;
+    char safe_email[128];
+    mysql_real_escape_string(db_conn, safe_email, new_email.c_str(), new_email.size());
+
+    char query[256];
+    snprintf(query, sizeof(query),
+        "UPDATE MEMBERSHIP SET DEFAULT_EMAIL='%s' WHERE USER_NUM=%d", safe_email, user_pk);
+
+    return (mysql_query(db_conn, query) == 0);
+}
+
+// 가격 검증 + 업그레이드만 허용 + MEMBERSHIP.GRADE 업데이트
+bool upgradeGradeInDB(int user_pk, const std::string& target_grade, int paid_price, std::string& err) {
+    if (gradeRank(target_grade) < 0) {
+        err = "invalid grade";
+        return false;
+    }
+
+    std::string cur = getUserGradeFromDB(user_pk);
+    int cur_rank = gradeRank(cur);
+    int tgt_rank = gradeRank(target_grade);
+    if (tgt_rank <= cur_rank) {
+        err = "only upgrade allowed";
+        return false;
+    }
+
+    int required = priceForGrade(target_grade);
+    if (paid_price != required) {
+        err = "price mismatch";
+        return false;
+    }
+
+    char safe_grade[64];
+    mysql_real_escape_string(db_conn, safe_grade, target_grade.c_str(), target_grade.size());
+
+    char query[256];
+    snprintf(query, sizeof(query),
+        "UPDATE MEMBERSHIP SET GRADE='%s' WHERE USER_NUM=%d", safe_grade, user_pk);
+
+    if (mysql_query(db_conn, query) != 0) {
+        err = mysql_error(db_conn);
+        return false;
+    }
+
+    err.clear();
+    return true;
+}
+// ===== [개인설정 DB 연동 함수 추가 끝] =====
+
+
+
+
 };
