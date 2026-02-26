@@ -9,6 +9,7 @@
 #include "AuthManager.hpp"
 #include "StorageManager.hpp"
 #include "MsgServerLogic.hpp" // 메시지 서버 (포트 9001)
+#include "UserManager.hpp"
 #include "AdminManager.hpp"
 
 using namespace std;

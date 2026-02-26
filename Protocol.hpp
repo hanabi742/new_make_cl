@@ -63,8 +63,17 @@ typedef enum
     PKT_REQ_EMAIL_VERIFY = 22, // 클라이언트 -> 서버: "내가 입력한 번호(123456) 맞니?"
     PKT_RES_EMAIL_VERIFY = 23,  // 서버 -> 클라이언트: "번호 맞다/틀리다"
 
+        // --- 파일 관리 확장 (40~46) ---
+    PKT_REQ_LIST = 40,          // 목록 요청
+    PKT_RES_LIST = 41,          // 목록 응답 (개별 파일 정보)
+    PKT_RES_LIST_END = 42,      // 목록 응답 완료
+    PKT_REQ_DELETE = 43,        // 단일 파일 삭제
+    PKT_RES_DELETE = 44,        // 삭제 결과
+    PKT_REQ_DELETE_FOLDER = 45, // 폴더 전체 삭제
+    PKT_RES_DELETE_FOLDER = 46, // 폴더 삭제 결과
+
     // --- 관리자 기능 (90~99) ---
-    PKT_REQ_ADMIN_BAN = 91,  // 유저 차단
+    // PKT_REQ_ADMIN_BAN = 91,  // 유저 차단
     PKT_RES_HANDSHAKE = 100, // 접속 직후 서버가 내려주는 최초 헤더
 
     PKT_REQ_FILE_LIST = 110,   // 파일 목록 요청
