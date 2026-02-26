@@ -66,6 +66,30 @@ void get_default_download_path(const char *filename, char *out_path)
     else
         strcpy(out_path, filename);
 }
+void delete_folder(int sock, int user_pk) 
+{
+    struct FilePacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.type = 45; pkt.user_pk = user_pk;
+    send(sock, (char *)&pkt, sizeof(pkt), 0);
+    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.type == 46) {
+        if (pkt.file_pk == 1) printf("  [Success] 폴더 철거 완료.\n");
+        else printf("  [Error] 삭제 거부! 폴더 안에 파일이 남아있습니다.\n");
+    }
+}
+
+void check_storage_quota(int sock, int user_pk) 
+{
+    struct FilePacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.type = 310; pkt.user_pk = user_pk;
+    send(sock, (char *)&pkt, sizeof(pkt), 0);
+    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.type == 311) {
+        long max_mb = pkt.file_size / (1024 * 1024);
+        long remain_mb = pkt.offset / (1024 * 1024);
+        printf("\n  [ 총 제공: %ld MB | 사용 중: %ld MB | 남은 용량: %ld MB ]\n", max_mb, max_mb - remain_mb, remain_mb);
+    }
+}
 
 void hash_password(const char *plain, char *out)
 {
@@ -193,45 +217,22 @@ int upload_file(int sock, int user_pk, const char *filename)
     pkt->type = PKT_REQ_UPLOAD_START;
     pkt->user_pk = user_pk;
     pkt->file_size = fsize;
-    send(sock, (char *)pkt, sizeof(*pkt), 0);
 
-    if (recv_all(sock, (char *)pkt, sizeof(*pkt)) > 0)
+    // 💡 [핵심 수정] 경로에서 순수 파일명만 추출하여 패킷에 담습니다.
+    const char *basename = strrchr(filename, '/'); // 리눅스 경로 슬래시 찾기
+    if (basename)
     {
-        file_pk = pkt->file_pk;
-        if (file_pk == -1)
-        {
-            printf("  [Error] 업로드 거부 (용량 초과 등)\n");
-            free(pkt);
-            fclose(fp);
-            return -1;
-        }
-        printf("  전송 중: ");
-        while (1)
-        {
-            memset(pkt, 0, sizeof(*pkt));
-            pkt->type = PKT_REQ_UPLOAD_CHUNK;
-            pkt->user_pk = user_pk;
-            pkt->file_pk = file_pk;
-            size_t rb = fread(pkt->data, 1, 8192, fp);
-            if (rb > 0)
-            {
-                pkt->data_size = (int)rb;
-                send(sock, (char *)pkt, sizeof(*pkt), 0);
-                printf("#");
-                fflush(stdout);
-            }
-            if (feof(fp))
-                break;
-            usleep(10000);
-        }
-        fclose(fp);
-        printf("\n  전송 완료!\n");
+        basename++; // 슬래시('/') 다음 글자부터 진짜 파일명
+    }
+    else
+    {
+        basename = filename; // 슬래시가 없으면 전체가 파일명
     }
 
-    memset(pkt, 0, sizeof(*pkt));
-    pkt->type = PKT_REQ_UPLOAD_END;
-    pkt->user_pk = user_pk;
-    pkt->file_pk = file_pk;
+    // 안전하게 복사
+    strncpy(pkt->data, basename, sizeof(pkt->data) - 1);
+    pkt->data[sizeof(pkt->data) - 1] = '\0';
+
     send(sock, (char *)pkt, sizeof(*pkt), 0);
 
     if (recv_all(sock, (char *)pkt, sizeof(*pkt)) > 0 && pkt->type == PKT_RES_UPLOAD_END)
@@ -239,6 +240,34 @@ int upload_file(int sock, int user_pk, const char *filename)
 
     free(pkt);
     return file_pk;
+}
+void request_file_list(int sock, int user_pk)
+{
+    struct FilePacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.type = 40; // PKT_REQ_LIST
+    pkt.user_pk = user_pk;
+
+    send(sock, (char *)&pkt, sizeof(pkt), 0);
+    printf("\n  [목록 조회 중...]\n");
+    printf("  %-8s | %-20s | %-10s\n", "PK", "파일명", "크기(Byte)");
+    printf("  --------------------------------------------\n");
+
+    while (1)
+    {
+        if (recv_all(sock, (char *)&pkt, sizeof(pkt)) <= 0)
+            break;
+
+        if (pkt.type == 42)
+            break; // PKT_RES_LIST_END 면 종료
+
+        if (pkt.type == 41)
+        { // PKT_RES_LIST
+            // 서버가 보낸 JSON 데이터(pkt.data)를 파싱 (여기선 간단히 출력 예시)
+            // 실제로는 nlohmann/json 등을 사용하거나 문자열 파싱 필요
+            printf("  %s\n", pkt.data);
+        }
+    }
 }
 
 void download_file(int sock, int user_pk, int file_pk, const char *save_path, const char *filename)
@@ -314,6 +343,7 @@ void menu_file(int sock, int user_pk)
         printf("  ║  2. 불러오기 (Download)          ║\n");
         printf("  ║  3. 내 파일 목록                 ║\n");
         printf("  ║  4. 파일 삭제                    ║\n");
+        printf("  ║  5. 남은 용량 확인               ║\n");
         printf("  ║  0. 돌아가기                     ║\n");
         printf("  ╚══════════════════════════════════╝\n");
         printf("  선택: ");
@@ -342,40 +372,38 @@ void menu_file(int sock, int user_pk)
             upload_file(sock, user_pk, path);
             PAUSE();
         }
-        else if (ch == 2)
+        else if (ch == 2) 
         {
-            int fpk;
-            char fname[256], spath[512];
-            printf("  파일 PK: ");
-            scanf("%d", &fpk);
-            FLUSH_STDIN();
-            printf("  저장 파일명: ");
-            scanf("%255s", fname);
-            FLUSH_STDIN();
+            printf("  [System] 최근 파일 목록 (최대 20개)\n");
+            request_file_list(sock, user_pk); // 💡 다운로드 전 목록 출력
+            
+            int fpk; char fname[256], spath[512];
+            printf("\n  다운로드할 파일 PK (취소: 0): "); scanf("%d", &fpk); FLUSH_STDIN();
+            if (fpk == 0) continue;
+            
+            printf("  저장할 이름 (경로 제외): "); scanf("%255s", fname); FLUSH_STDIN();
             get_default_download_path(fname, spath);
-            printf("  저장 위치: %s\n", spath);
             download_file(sock, user_pk, fpk, spath, fname);
             PAUSE();
         }
-        else if (ch == 3)
+        else if (ch == 4) 
         {
-            printf("  [System] 파일 목록 조회 (미구현)\n");
+            printf("  [System] 내 파일 목록\n");
+            request_file_list(sock, user_pk); // 💡 삭제 전 목록 출력
+            
+            int dpk;
+            printf("\n  삭제할 파일 PK (취소: 0): "); scanf("%d", &dpk); FLUSH_STDIN();
+            if (dpk != 0) delete_file(sock, user_pk, dpk);
             PAUSE();
         }
-        else if (ch == 4)
+        else if (ch == 5) 
         {
-            int dpk;
-            printf("  삭제할 파일 PK: ");
-            scanf("%d", &dpk);
-            FLUSH_STDIN();
-
-            // 💡 새로 추가한 삭제 함수 호출
-            delete_file(sock, user_pk, dpk);
+            check_storage_quota(sock, user_pk);
             PAUSE();
         }
         else
         {
-            printf("  [Error] 0~4 중 선택하세요.\n");
+            printf("  [Error] 0~5 중 선택하세요.\n");
             PAUSE();
         }
     }
@@ -424,10 +452,16 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
             printf("  [System] 해당 기능은 준비 중입니다.\n");
             PAUSE();
         }
-        else if (ch == 4)
+        else if (ch == 4) 
         {
-            printf("  [경고] 계정 탈퇴 시 모든 파일이 삭제됩니다.\n");
-            printf("  [System] 폴더 삭제 (미구현)\n");
+            printf("  [경고] 빈 폴더만 철거 가능합니다. 지우시겠습니까? (1:예): ");
+            int confirm;
+            if (scanf("%d", &confirm) == 1 && confirm == 1) 
+            {
+                FLUSH_STDIN();
+                delete_folder(sock, user_pk);
+            } 
+            else { FLUSH_STDIN(); }
             PAUSE();
         }
         else if (ch == 5)

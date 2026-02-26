@@ -52,14 +52,6 @@ private:
         return j;
     }
 
-    // [내부 함수] 특정 유저의 파일 리스트(JSON)를 저장하는 함수
-    void saveFileListJson(int user_pk, const json &j)
-    {
-        fs::path db_path = server_root / std::to_string(user_pk) / "files.json";
-        std::ofstream ofs(db_path);
-        ofs << j.dump(4);
-    }
-
     // DB에서 파일 경로 조회
     string getFilePathFromDB(int user_pk, int file_pk)
     {
@@ -214,23 +206,12 @@ public:
         {
             if (fs::exists(dest))
                 fs::remove(dest);
-            fs::rename(src, dest); // 임시 파일을 최종 PK.dat 로 이동
-
-            // JSON 메타데이터 기록
-            json file_list = getFileListJson(user_pk);
-            json new_file = {
-                {"file_pk", file_pk},
-                {"file_name", original_name},
-                {"file_size", file_size},
-                {"upload_date", "now"}};
-            file_list.push_back(new_file);
-            saveFileListJson(user_pk, file_list);
-
+            fs::rename(src, dest);
+            // JSON 저장 로직 완전 삭제
             return true;
         }
         catch (const fs::filesystem_error &e)
         {
-            cerr << "[Storage Error] moveFileToFinal: " << e.what() << endl;
             return false;
         }
     }
@@ -254,9 +235,40 @@ public:
 
     std::string getUserFileList(int user_pk)
     {
-        std::lock_guard<std::mutex> lock(mtx);
-        json j = getFileListJson(user_pk);
-        return j.dump();
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
+        if (!conn)
+            return "DB 연결 오류\n";
+        checkConnection();
+
+        char query[256];
+        snprintf(query, sizeof(query), "SELECT FILE_PK, ORIGINAL_NAME, FILE_SIZE, CREATED_AT FROM FILE_PATH WHERE USER_NUM = %d ORDER BY CREATED_AT DESC LIMIT 20", user_pk);
+
+        if (mysql_query(conn, query))
+            return "목록 조회 실패\n";
+
+        MYSQL_RES *res = mysql_store_result(conn);
+        if (!res)
+            return "목록 없음\n";
+
+        std::string result = "";
+        MYSQL_ROW row;
+        while ((row = mysql_fetch_row(res)))
+        {
+            result += "  [PK: ";
+            result += row[0] ? row[0] : "?";
+            result += "] ";
+            result += row[1] ? row[1] : "이름없음";
+            result += " (";
+            result += row[2] ? row[2] : "0";
+            result += " byte) - ";
+            result += row[3] ? row[3] : "?";
+            result += "\n";
+        }
+        mysql_free_result(res);
+
+        if (result.empty())
+            return "  저장된 파일이 없습니다.\n";
+        return result;
     }
 
     size_t getFileSize(int user_pk, int file_pk)
@@ -314,43 +326,25 @@ public:
     bool deleteFile(int user_pk, int file_pk)
     {
         bool file_deleted = false;
-
-        // 1. 물리적 파일 및 JSON 데이터 삭제
         {
             std::lock_guard<std::mutex> lock(mtx);
             fs::path target_path = server_root / std::to_string(user_pk) / (std::to_string(file_pk) + ".dat");
-
             if (fs::exists(target_path))
             {
-                fs::remove(target_path); // 디스크에서 삭제되는 순간 남은 용량 복구됨
+                fs::remove(target_path);
                 file_deleted = true;
             }
-
-            // JSON 파일 갱신 (리스트에서 해당 파일 빼기)
-            json file_list = getFileListJson(user_pk);
-            json new_list = json::array();
-            for (auto &item : file_list)
-            {
-                if (item["file_pk"] != file_pk)
-                {
-                    new_list.push_back(item);
-                }
-            }
-            saveFileListJson(user_pk, new_list);
         }
-
-        // 2. DB 기록 삭제
         {
             std::lock_guard<std::recursive_mutex> db_lock(db_mtx);
             if (!conn)
                 return false;
             checkConnection();
-
             char query[256];
             snprintf(query, sizeof(query), "DELETE FROM FILE_PATH WHERE FILE_PK = %d AND USER_NUM = %d", file_pk, user_pk);
-            mysql_query(conn, query);
+            if (mysql_query(conn, query) == 0)
+                file_deleted = true; // DB에서 지워졌다면 성공
         }
-
         return file_deleted;
     }
 
@@ -372,5 +366,38 @@ public:
         {
             std::cerr << "[Storage Error] 파일 삭제 중 오류: " << e.what() << std::endl;
         }
+    }
+    bool deleteUserFolder(int user_pk)
+    {
+        std::lock_guard<std::recursive_mutex> lock(db_mtx);
+        if (!conn) return false;
+        checkConnection();
+
+        char query[256];
+        snprintf(query, sizeof(query), "SELECT COUNT(*) FROM FILE_PATH WHERE USER_NUM = %d", user_pk);
+        if (mysql_query(conn, query)) return false;
+
+        MYSQL_RES *res = mysql_store_result(conn);
+        if (!res) return false;
+
+        MYSQL_ROW row = mysql_fetch_row(res);
+        int file_count = (row && row[0]) ? atoi(row[0]) : 0;
+        mysql_free_result(res);
+
+        // 파일이 남아있으면 삭제 불가
+        if (file_count > 0) return false;
+
+        // 물리적 폴더 철거
+        std::lock_guard<std::mutex> fs_lock(mtx);
+        try 
+        {
+            fs::path s_path = server_root / std::to_string(user_pk);
+            fs::path u_path = uploading_root / std::to_string(user_pk);
+            if (fs::exists(s_path)) fs::remove_all(s_path);
+            if (fs::exists(u_path)) fs::remove_all(u_path);
+            return true;
+        } 
+        catch (...) 
+        { return false; }
     }
 };

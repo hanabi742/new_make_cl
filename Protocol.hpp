@@ -39,31 +39,27 @@ namespace fs = std::filesystem;
 /* 5. 패킷 타입 정의 (enum 사용) */
 typedef enum
 {
-    // --- 파일 업로드 관련 (1~5) ---
-    PKT_REQ_UPLOAD_START = 1, // 클라이언트 -> 서버 (업로드 시작 요청)
-    PKT_RES_UPLOAD_START = 2, // 서버 -> 클라이언트 (파일 PK 발급 응답)
-    PKT_REQ_UPLOAD_CHUNK = 3, // 클라이언트 -> 서버 (파일 조각 전송)
-    PKT_REQ_UPLOAD_END = 4,   // 클라이언트 -> 서버 (업로드 완료 보고)
-    PKT_RES_UPLOAD_END = 5,   // 서버 -> 클라이언트 (최종 저장 완료 응답)
+    // --- 파일 업로드/다운로드 관련 (1~8) ---
+    PKT_REQ_UPLOAD_START = 1,
+    PKT_RES_UPLOAD_START = 2,
+    PKT_REQ_UPLOAD_CHUNK = 3,
+    PKT_REQ_UPLOAD_END = 4,
+    PKT_RES_UPLOAD_END = 5,
+    PKT_REQ_DOWNLOAD_START = 6, 
+    PKT_RES_DOWNLOAD_START = 7, 
+    PKT_RES_DOWNLOAD_DATA = 8,  
 
-    // --- 파일 다운로드 관련 (6~8) ---
-    PKT_REQ_DOWNLOAD_START = 6, // 클라이언트 -> 서버 (다운로드 요청)
-    PKT_RES_DOWNLOAD_START = 7, // 서버 -> 클라이언트 (파일 정보/크기 응답)
-    PKT_RES_DOWNLOAD_DATA = 8,  // 서버 -> 클라이언트 (파일 데이터 전송)
+    // --- 인증 및 이메일 (10~23) ---
+    PKT_REQ_REGISTER = 10, 
+    PKT_RES_REGISTER = 11, 
+    PKT_REQ_LOGIN = 12,    
+    PKT_RES_LOGIN = 13,    
+    PKT_REQ_EMAIL_AUTH = 20,   
+    PKT_RES_EMAIL_AUTH = 21,   
+    PKT_REQ_EMAIL_VERIFY = 22, 
+    PKT_RES_EMAIL_VERIFY = 23, 
 
-    // --- 인증 관련 (10~13) ---
-    PKT_REQ_REGISTER = 10, // 클라이언트 -> 서버 (회원가입 요청)
-    PKT_RES_REGISTER = 11, // 서버 -> 클라이언트 (가입 결과/PK 응답)
-    PKT_REQ_LOGIN = 12,    // 클라이언트 -> 서버 (로그인 요청)
-    PKT_RES_LOGIN = 13,    // 서버 -> 클라이언트 (로그인 결과/PK 응답)
-
-    // [이메일 인증 관련 패킷]
-    PKT_REQ_EMAIL_AUTH = 20,   // 클라이언트 -> 서버: "이 주소로 메일 보내줘"
-    PKT_RES_EMAIL_AUTH = 21,   // 서버 -> 클라이언트: "메일 보냈어(성공/실패)"
-    PKT_REQ_EMAIL_VERIFY = 22, // 클라이언트 -> 서버: "내가 입력한 번호(123456) 맞니?"
-    PKT_RES_EMAIL_VERIFY = 23,  // 서버 -> 클라이언트: "번호 맞다/틀리다"
-
-        // --- 파일 관리 확장 (40~46) ---
+    // --- 파일 관리 확장 (40~46) ---
     PKT_REQ_LIST = 40,          // 목록 요청
     PKT_RES_LIST = 41,          // 목록 응답 (개별 파일 정보)
     PKT_RES_LIST_END = 42,      // 목록 응답 완료
@@ -72,26 +68,16 @@ typedef enum
     PKT_REQ_DELETE_FOLDER = 45, // 폴더 전체 삭제
     PKT_RES_DELETE_FOLDER = 46, // 폴더 삭제 결과
 
-    // --- 관리자 기능 (90~99) ---
-    // PKT_REQ_ADMIN_BAN = 91,  // 유저 차단
-    PKT_RES_HANDSHAKE = 100, // 접속 직후 서버가 내려주는 최초 헤더
-
-    PKT_REQ_FILE_LIST = 110,   // 파일 목록 요청
-    PKT_RES_FILE_LIST = 111,   // 파일 목록 응답
-    PKT_REQ_DELETE_FILE = 112, // 특정 파일 삭제 요청
-    PKT_RES_DELETE_FILE = 113, // 삭제 결과 응답
-
-    PKT_REQ_ADMIN_NOTICE = 200, // 공지 발송 요청
-    PKT_REQ_ADMIN_BAN = 201,    // 유저 차단 요청
-    PKT_REQ_ADMIN_RESET = 202,  // 서버 초기화 요청
-    PKT_REQ_ADMIN_USAGE = 203,  // (기존 92번을 203으로 통합)
-
-    PKT_REQ_USER_SETTINGS = 300, // 클라 -> 서버: 개인 설정 변경 요청
-    PKT_RES_USER_SETTINGS = 301, // 서버 -> 클라: 설정 변경 결과
-
+    // --- 관리자 및 설정, 용량 조회 (100~311) ---
+    PKT_RES_HANDSHAKE = 100, 
+    PKT_REQ_ADMIN_NOTICE = 200, 
+    PKT_REQ_ADMIN_BAN = 201,    
+    PKT_REQ_ADMIN_RESET = 202,  
+    PKT_REQ_ADMIN_USAGE = 203,  
+    PKT_REQ_USER_SETTINGS = 300, 
+    PKT_RES_USER_SETTINGS = 301, 
     PKT_REQ_STORAGE_INFO = 310, // 용량 정보 요청
     PKT_RES_STORAGE_INFO = 311  // 용량 정보 응답
-
 } PacketType;
 
 /* 6. 패킷 구조체 (1바이트 정렬) */

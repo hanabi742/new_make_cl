@@ -209,6 +209,67 @@ int main()
             }
             break;
         }
+        case PKT_REQ_LIST: // 40
+        {
+            string list_data = storage.getUserFileList(packet->user_pk);
+            FilePacket res = {};
+            res.type = PKT_RES_LIST; // 41
+            res.user_pk = packet->user_pk;
+
+            size_t max_data_len = sizeof(res.data) - 1;
+            size_t offset = 0;
+
+            // 데이터가 클 수 있으므로 패킷 크기만큼 안전하게 잘라서 전송
+            while (offset < list_data.size())
+            {
+                memset(res.data, 0, sizeof(res.data));
+                size_t copy_len = min(list_data.size() - offset, max_data_len);
+                strncpy(res.data, list_data.c_str() + offset, copy_len);
+                send(client_sock, (char *)&res, sizeof(FilePacket), 0);
+                offset += copy_len;
+            }
+
+            // 전송 끝 알림
+            res.type = PKT_RES_LIST_END; // 42
+            memset(res.data, 0, sizeof(res.data));
+            send(client_sock, (char *)&res, sizeof(FilePacket), 0);
+            break;
+        }
+        case PKT_REQ_DELETE_FOLDER: 
+        {
+            bool success = storage.deleteUserFolder(packet->user_pk);
+            FilePacket res = {};
+            res.type = PKT_RES_DELETE_FOLDER; 
+            res.file_pk = success ? 1 : -1;   // 1: 성공, -1: 실패 (파일 남음)
+            send(client_sock, (char *)&res, sizeof(FilePacket), 0);
+            break;
+        }
+
+        case PKT_REQ_STORAGE_INFO: 
+        {
+            long long max_quota = (packet->user_pk == 10) ? (100 * 1024 * 1024) : (10 * 1024 * 1024); 
+            long long remaining = storage.getRemainingQuota(packet->user_pk, max_quota);
+
+            FilePacket res = {};
+            res.type = PKT_RES_STORAGE_INFO;
+            res.user_pk = packet->user_pk;
+            res.file_size = max_quota; 
+            res.offset = remaining;    
+            
+            send(client_sock, (char *)&res, sizeof(FilePacket), 0);
+            break;
+        }
+
+        // ── [파일 삭제] ─────────────────────────────
+        case PKT_REQ_DELETE: // 43
+        {
+            bool success = storage.deleteFile(packet->user_pk, packet->file_pk);
+            FilePacket res = {};
+            res.type = PKT_RES_DELETE; // 44
+            res.file_pk = success ? 1 : -1;
+            send(client_sock, (char *)&res, sizeof(FilePacket), 0);
+            break;
+        }
 
         case PKT_REQ_EMAIL_AUTH:
         {
@@ -289,57 +350,56 @@ int main()
             break;
         }
 
-
         case PKT_REQ_ADMIN_NOTICE:
+        {
+            AdminPacket *admin_pkt = (AdminPacket *)packet;
+            if (admin_pkt->admin_pk == 1)
             {
-                AdminPacket *admin_pkt = (AdminPacket *)packet;
-                if (admin_pkt->admin_pk == 1)
-                {
-                    admin.sendGlobalNotice(admin_pkt->data);
-                }
-                break;
+                admin.sendGlobalNotice(admin_pkt->data);
+            }
+            break;
+        }
+
+        case PKT_REQ_ADMIN_BAN:
+        {
+            AdminPacket *admin_pkt = (AdminPacket *)packet; //
+            if (admin_pkt->admin_pk == 1)
+            {
+                admin.banUser(admin_pkt->target_pk);
+            }
+            break;
+        }
+
+        case PKT_REQ_ADMIN_RESET:
+        {
+            AdminPacket *admin_pkt = (AdminPacket *)packet;
+            if (admin_pkt->admin_pk == 1)
+            {
+                admin.resetSystem();
+            }
+            break;
+        }
+
+        case PKT_REQ_USER_SETTINGS:
+        {
+            UserSettingsPacket *req = (UserSettingsPacket *)packet;
+            bool success = false;
+
+            if (req->setting_type == 1)
+            {
+                success = user_mgr.updateUserName(req->user_pk, req->new_data);
+            }
+            else if (req->setting_type == 2)
+            {
+                success = user_mgr.updateUserPassword(req->user_pk, req->new_data);
             }
 
-            case PKT_REQ_ADMIN_BAN:
-            {
-                AdminPacket *admin_pkt = (AdminPacket *)packet; //
-                if (admin_pkt->admin_pk == 1)
-                {
-                    admin.banUser(admin_pkt->target_pk);
-                }
-                break;
-            }
-
-            case PKT_REQ_ADMIN_RESET:
-            {
-                AdminPacket *admin_pkt = (AdminPacket *)packet;
-                if (admin_pkt->admin_pk == 1)
-                {
-                    admin.resetSystem();
-                }
-                break;
-            }
-
-            case PKT_REQ_USER_SETTINGS:
-            {
-                UserSettingsPacket *req = (UserSettingsPacket *)packet;
-                bool success = false;
-
-                if (req->setting_type == 1)
-                {
-                    success = user_mgr.updateUserName(req->user_pk, req->new_data);
-                }
-                else if (req->setting_type == 2)
-                {
-                    success = user_mgr.updateUserPassword(req->user_pk, req->new_data);
-                }
-
-                FilePacket res = {};
-                res.type = PKT_RES_USER_SETTINGS;
-                res.file_pk = success ? 1 : -1;
-                send(client_sock, (char *)&res, sizeof(FilePacket), 0);
-                break;
-            }
+            FilePacket res = {};
+            res.type = PKT_RES_USER_SETTINGS;
+            res.file_pk = success ? 1 : -1;
+            send(client_sock, (char *)&res, sizeof(FilePacket), 0);
+            break;
+        }
 
         default:
             break;
