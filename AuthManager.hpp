@@ -73,8 +73,8 @@ private:
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // [핵심] DB MEMBERSHIP 기준으로 이메일 존재 여부 확인
-    // DB에서 DELETE하면 false 반환 → 재가입 허용
+    // DB MEMBERSHIP 기준으로 이메일(ID) 존재 여부 확인
+    // ERD: ID VARCHAR(25) → safe 버퍼 26바이트면 충분하나 여유있게 51로 유지
     // ─────────────────────────────────────────────────────────────────────────
     bool isEmailExistsInDB(const string& id)
     {
@@ -84,17 +84,13 @@ private:
             return false;
         }
 
+        // [수정] ERD: ID VARCHAR(25) → 최대 25자, 이스케이프 버퍼 51로 유지
         char safe_id[51];
-        char safe_hash[129];
-        char safe_name[61];
         mysql_real_escape_string(db_conn, safe_id, id.c_str(), id.size());
 
-        //재훈수정
         char query[256];
         snprintf(query, sizeof(query),
-        "INSERT INTO MEMBERSHIP (ID, PW, NAME, GRADE, DEFAULT_EMAIL) "
-        "VALUES ('%s', '%s', '%s', '일반', '%s')",
-        safe_id, safe_hash, safe_name, safe_id);
+            "SELECT COUNT(*) FROM MEMBERSHIP WHERE ID = '%s'", safe_id);
 
         if (mysql_query(db_conn, query))
         {
@@ -117,8 +113,12 @@ private:
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // [핵심 수정] MEMBERSHIP INSERT → 생성된 실제 USER_NUM 반환
-    // 기존: bool 반환(USER_NUM 버림) → 변경: int 반환
+    // MEMBERSHIP INSERT → 생성된 실제 USER_NUM 반환
+    //
+    // ERD 기준 컬럼 크기:
+    //   NAME  VARCHAR(5)  → safe 버퍼 11
+    //   PW    VARCHAR(64) → safe 버퍼 129
+    //   ID    VARCHAR(25) → safe 버퍼 51
     // ─────────────────────────────────────────────────────────────────────────
     int insertMembership(const string& id, const string& pwd_hash, const string& name)
     {
@@ -130,14 +130,17 @@ private:
             return -1;
         }
 
-        char safe_id[51];
-        char safe_hash[129];
-        char safe_name[61];
+        // [수정] ERD 컬럼 크기에 맞춘 이스케이프 버퍼
+        char safe_id[51];    // ID VARCHAR(25) → 이스케이프 여유 포함 51
+        char safe_hash[129]; // PW VARCHAR(64) → 이스케이프 여유 포함 129
+        char safe_name[11];  // [수정] NAME VARCHAR(5) → 이스케이프 여유 포함 11 (ERD 기준)
 
         mysql_real_escape_string(db_conn, safe_id,   id.c_str(),       id.size());
         mysql_real_escape_string(db_conn, safe_hash, pwd_hash.c_str(), pwd_hash.size());
         mysql_real_escape_string(db_conn, safe_name, name.c_str(),     name.size());
 
+        // [수정] ERD에 GRADE DEFAULT '일반' 이 있으므로 INSERT 시 명시 불필요 (DB가 자동 설정)
+        //        DEFAULT_EMAIL은 NULL 허용이므로 생략
         char query[512];
         snprintf(query, sizeof(query),
             "INSERT INTO MEMBERSHIP (ID, PW, NAME) VALUES ('%s', '%s', '%s')",
@@ -159,6 +162,7 @@ private:
     }
 
     // ── DB에서 ID+PW로 실제 USER_NUM 조회 (로그인용) ─────────────────────────
+    // ERD: ID VARCHAR(25), PW VARCHAR(64)
     int queryUserNumFromDB(const string& id, const string& pwd_hash)
     {
         cout << "[AuthDB] queryUserNumFromDB() 호출: id=" << id << endl;
@@ -169,8 +173,8 @@ private:
             return -1;
         }
 
-        char safe_id[51];
-        char safe_hash[129];
+        char safe_id[51];    // ID VARCHAR(25)
+        char safe_hash[129]; // PW VARCHAR(64)
         mysql_real_escape_string(db_conn, safe_id,   id.c_str(),       id.size());
         mysql_real_escape_string(db_conn, safe_hash, pwd_hash.c_str(), pwd_hash.size());
 
@@ -322,9 +326,6 @@ public:
 
     // ─────────────────────────────────────────────────────────────────────────
     // 이메일 인증 코드 발송 요청
-    //
-    // [수정] JSON이 아닌 DB 기준으로 중복 확인
-    //   DB DELETE → 재가입 가능 / DB에 존재 → 발송 거부
     // ─────────────────────────────────────────────────────────────────────────
     bool requestEmailAuth(const string &email)
     {
@@ -349,14 +350,7 @@ public:
 
     // ─────────────────────────────────────────────────────────────────────────
     // 회원가입
-    //
-    // [수정]
-    //   - 중복 체크: JSON → DB 기준
-    //   - 반환값: DB auto_increment USER_NUM (200번~)
-    //   - JSON에도 DB USER_NUM으로 동기화
-    //
-    // 반환값:
-    //   양수: 성공 (DB USER_NUM)   -1: 이미 존재   -2: DB오류   -3: 인증미완료
+    // 반환값: 양수=성공(DB USER_NUM), -1=이미존재, -2=DB오류, -3=인증미완료
     // ─────────────────────────────────────────────────────────────────────────
     int registerUser(const string &id, const string &pwd_hash, const string &name = "")
     {
@@ -384,7 +378,6 @@ public:
             return -2;
         }
 
-        // JSON에 DB USER_NUM으로 동기화 저장
         user_db[id] = {{"user_pk", new_db_num}, {"pwd_hash", pwd_hash}};
         saveDB();
         verified_emails.erase(id);
@@ -395,12 +388,7 @@ public:
 
     // ─────────────────────────────────────────────────────────────────────────
     // 로그인
-    //
-    // [수정] DB에서 직접 USER_NUM 조회 반환
-    //   → FILE_PATH FK 위반 해결
-    //
-    // 반환값:
-    //   양수: 성공 (DB USER_NUM)   -1: 불일치   -2: 잠금
+    // 반환값: 양수=성공(DB USER_NUM), -1=불일치, -2=잠금
     // ─────────────────────────────────────────────────────────────────────────
     int loginUser(const string &id, const string &pwd_hash)
     {
@@ -444,136 +432,251 @@ public:
         }
     }
 
-    //재훈추가
-    // ===== [개인설정 DB 연동 함수 추가] =====
-static long long quotaBytesForGrade(const std::string& grade) {
-    if (grade == "비지니스") return 200LL * 1024 * 1024;
-    if (grade == "VIP")     return 500LL * 1024 * 1024;
-    if (grade == "VVIP")    return 1LL   * 1024 * 1024 * 1024;
-    return 100LL * 1024 * 1024; // 일반
-}
+    // =========================================================================
+    // [추가] 사용자 정보 조회 (개인설정 화면 진입 시 현재 이름/기본이메일 표시)
+    //
+    // ERD 기준:
+    //   NAME          VARCHAR(5)  → out_name 버퍼 최소 6바이트
+    //   DEFAULT_EMAIL VARCHAR(64) → out_def_email 버퍼 최소 65바이트
+    //
+    // 파라미터:
+    //   user_pk       - 조회할 USER_NUM (PK)
+    //   out_name      - [출력] NAME 컬럼값
+    //   out_def_email - [출력] DEFAULT_EMAIL 컬럼값 (미설정 시 빈 문자열)
+    //
+    // 반환값: true=성공, false=DB오류 or user_pk 없음
+    // =========================================================================
+    bool getUserInfo(int user_pk, string& out_name, string& out_def_email)
+    {
+        if (!ensureConnected())
+        {
+            cerr << "[AuthDB Error] getUserInfo: DB 연결 불가" << endl;
+            return false;
+        }
 
-static int priceForGrade(const std::string& grade) {
-    if (grade == "비지니스") return 100000;
-    if (grade == "VIP")     return 200000;
-    if (grade == "VVIP")    return 300000;
-    return 0; // 일반
-}
+        char query[256];
+        snprintf(query, sizeof(query),
+            // [수정] ERD 컬럼명 그대로 사용: NAME, DEFAULT_EMAIL
+            "SELECT NAME, DEFAULT_EMAIL FROM MEMBERSHIP WHERE USER_NUM = %d",
+            user_pk);
 
-static int gradeRank(const std::string& grade) {
-    if (grade == "일반")    return 0;
-    if (grade == "비지니스") return 1;
-    if (grade == "VIP")     return 2;
-    if (grade == "VVIP")    return 3;
-    return -1;
-}
+        if (mysql_query(db_conn, query))
+        {
+            cerr << "[AuthDB Error] getUserInfo 쿼리 실패: " << mysql_error(db_conn) << endl;
+            return false;
+        }
 
-std::string getUserGradeFromDB(int user_pk) {
-    if (!db_conn) return "일반";
-    char query[256];
-    snprintf(query, sizeof(query), "SELECT GRADE FROM MEMBERSHIP WHERE USER_NUM=%d", user_pk);
-    if (mysql_query(db_conn, query)) return "일반";
+        MYSQL_RES* res = mysql_store_result(db_conn);
+        if (!res) return false;
 
-    MYSQL_RES* res = mysql_store_result(db_conn);
-    if (!res) return "일반";
-    MYSQL_ROW row = mysql_fetch_row(res);
-    std::string grade = (row && row[0] && row[0][0]) ? std::string(row[0]) : "일반";
-    mysql_free_result(res);
+        MYSQL_ROW row = mysql_fetch_row(res);
+        if (!row)
+        {
+            mysql_free_result(res);
+            cerr << "[AuthDB Error] getUserInfo: USER_NUM=" << user_pk << " 없음" << endl;
+            return false;
+        }
 
-    if (gradeRank(grade) < 0) grade = "일반";
-    return grade;
-}
+        out_name      = row[0] ? row[0] : "";
+        out_def_email = row[1] ? row[1] : ""; // DEFAULT_EMAIL이 NULL이면 빈 문자열로 처리
+        mysql_free_result(res);
 
-std::string getDefaultEmailFromDB(int user_pk) {
-    if (!db_conn) return "";
-    char query[256];
-    snprintf(query, sizeof(query), "SELECT DEFAULT_EMAIL FROM MEMBERSHIP WHERE USER_NUM=%d", user_pk);
-    if (mysql_query(db_conn, query)) return "";
-
-    MYSQL_RES* res = mysql_store_result(db_conn);
-    if (!res) return "";
-    MYSQL_ROW row = mysql_fetch_row(res);
-    std::string email = (row && row[0] && row[0][0]) ? std::string(row[0]) : "";
-    mysql_free_result(res);
-    return email;
-}
-
-bool updateUserNameInDB(int user_pk, const std::string& new_name) {
-    if (!db_conn) return false;
-    char safe_name[64];
-    mysql_real_escape_string(db_conn, safe_name, new_name.c_str(), new_name.size());
-
-    char query[256];
-    snprintf(query, sizeof(query),
-        "UPDATE MEMBERSHIP SET NAME='%s' WHERE USER_NUM=%d", safe_name, user_pk);
-
-    return (mysql_query(db_conn, query) == 0);
-}
-
-// 비밀번호는 MEMBERSHIP.PW에 저장(해시 문자열)
-bool updateUserPasswordHashInDB(int user_pk, const std::string& new_hash) {
-    if (!db_conn) return false;
-    char safe_hash[140];
-    mysql_real_escape_string(db_conn, safe_hash, new_hash.c_str(), new_hash.size());
-
-    char query[256];
-    snprintf(query, sizeof(query),
-        "UPDATE MEMBERSHIP SET PW='%s' WHERE USER_NUM=%d", safe_hash, user_pk);
-
-    return (mysql_query(db_conn, query) == 0);
-}
-
-bool updateDefaultEmailInDB(int user_pk, const std::string& new_email) {
-    if (!db_conn) return false;
-    char safe_email[128];
-    mysql_real_escape_string(db_conn, safe_email, new_email.c_str(), new_email.size());
-
-    char query[256];
-    snprintf(query, sizeof(query),
-        "UPDATE MEMBERSHIP SET DEFAULT_EMAIL='%s' WHERE USER_NUM=%d", safe_email, user_pk);
-
-    return (mysql_query(db_conn, query) == 0);
-}
-
-// 가격 검증 + 업그레이드만 허용 + MEMBERSHIP.GRADE 업데이트
-bool upgradeGradeInDB(int user_pk, const std::string& target_grade, int paid_price, std::string& err) {
-    if (gradeRank(target_grade) < 0) {
-        err = "invalid grade";
-        return false;
+        cout << "[Auth] getUserInfo 성공: name=" << out_name
+             << ", default_email=" << (out_def_email.empty() ? "(미설정)" : out_def_email)
+             << endl;
+        return true;
     }
 
-    std::string cur = getUserGradeFromDB(user_pk);
-    int cur_rank = gradeRank(cur);
-    int tgt_rank = gradeRank(target_grade);
-    if (tgt_rank <= cur_rank) {
-        err = "only upgrade allowed";
-        return false;
+    // =========================================================================
+    // [추가] 기본 이메일(발신 이메일) 설정
+    //
+    // ERD: DEFAULT_EMAIL VARCHAR(64) → 64자 초과 입력 차단
+    //
+    // 파라미터:
+    //   user_pk   - 변경할 USER_NUM
+    //   new_email - 새로 설정할 발신 이메일 (최대 64자)
+    //
+    // 반환값: true=성공, false=실패
+    // =========================================================================
+    bool updateDefaultEmail(int user_pk, const string& new_email)
+    {
+        cout << "[Auth] updateDefaultEmail() 호출: user_pk=" << user_pk
+             << ", new_email=" << new_email << endl;
+
+        // [수정] ERD: DEFAULT_EMAIL VARCHAR(64) → 64자 초과 시 거부
+        if (new_email.size() > 64)
+        {
+            cerr << "[Auth] updateDefaultEmail: 이메일 64자 초과 (ERD 제한)" << endl;
+            return false;
+        }
+
+        if (!ensureConnected())
+        {
+            cerr << "[AuthDB Error] updateDefaultEmail: DB 연결 불가" << endl;
+            return false;
+        }
+
+        // [수정] DEFAULT_EMAIL VARCHAR(64) → 이스케이프 버퍼 129
+        char safe_email[129];
+        mysql_real_escape_string(db_conn, safe_email, new_email.c_str(), new_email.size());
+
+        char query[512];
+        snprintf(query, sizeof(query),
+            "UPDATE MEMBERSHIP SET DEFAULT_EMAIL = '%s' WHERE USER_NUM = %d",
+            safe_email, user_pk);
+
+        if (mysql_query(db_conn, query))
+        {
+            cerr << "[AuthDB Error] DEFAULT_EMAIL UPDATE 실패: "
+                 << mysql_error(db_conn) << endl;
+            return false;
+        }
+
+        if (mysql_affected_rows(db_conn) == 0)
+        {
+            cerr << "[AuthDB Error] updateDefaultEmail: USER_NUM=" << user_pk << " 없음" << endl;
+            return false;
+        }
+
+        cout << "[Auth] DEFAULT_EMAIL 변경 성공: USER_NUM=" << user_pk
+             << " → " << new_email << endl;
+        return true;
     }
 
-    int required = priceForGrade(target_grade);
-    if (paid_price != required) {
-        err = "price mismatch";
-        return false;
+    // =========================================================================
+    // [추가] 비밀번호 변경
+    //
+    // ERD: PW VARCHAR(64) → SHA-256 hex(64자) 딱 맞음
+    // 현재 비밀번호(old_pwd_hash)가 DB와 일치할 때만 새 비밀번호로 UPDATE.
+    // ※ 클라이언트에서 SHA-256 해싱 후 전달 (요구사항 7)
+    //
+    // 파라미터:
+    //   user_pk      - 변경할 USER_NUM
+    //   old_pwd_hash - 현재 PW의 SHA-256 hex (64자)
+    //   new_pwd_hash - 새 PW의 SHA-256 hex (64자)
+    //
+    // 반환값:  1=성공, 0=현재PW 불일치, -1=DB 오류
+    // =========================================================================
+    int updatePassword(int user_pk, const string& old_pwd_hash, const string& new_pwd_hash)
+    {
+        cout << "[Auth] updatePassword() 호출: user_pk=" << user_pk << endl;
+
+        // [수정] ERD: PW VARCHAR(64) → SHA-256 hex는 정확히 64자, 초과 시 거부
+        if (old_pwd_hash.size() != 64 || new_pwd_hash.size() != 64)
+        {
+            cerr << "[Auth] updatePassword: 해시값 길이 오류 (64자 필요)" << endl;
+            return -1;
+        }
+
+        if (!ensureConnected())
+        {
+            cerr << "[AuthDB Error] updatePassword: DB 연결 불가" << endl;
+            return -1;
+        }
+
+        // 1단계: 현재 비밀번호 일치 여부 확인
+        // [수정] PW VARCHAR(64) → 이스케이프 버퍼 129
+        char safe_old[129];
+        mysql_real_escape_string(db_conn, safe_old, old_pwd_hash.c_str(), old_pwd_hash.size());
+
+        char check_query[512];
+        snprintf(check_query, sizeof(check_query),
+            "SELECT COUNT(*) FROM MEMBERSHIP WHERE USER_NUM = %d AND PW = '%s'",
+            user_pk, safe_old);
+
+        if (mysql_query(db_conn, check_query))
+        {
+            cerr << "[AuthDB Error] PW 일치 확인 실패: " << mysql_error(db_conn) << endl;
+            return -1;
+        }
+
+        MYSQL_RES* res = mysql_store_result(db_conn);
+        if (!res) return -1;
+        MYSQL_ROW row = mysql_fetch_row(res);
+        int match = (row && row[0]) ? atoi(row[0]) : 0;
+        mysql_free_result(res);
+
+        if (match == 0)
+        {
+            cerr << "[Auth] updatePassword: 현재 비밀번호 불일치 (USER_NUM=" << user_pk << ")" << endl;
+            return 0;
+        }
+
+        // 2단계: 새 비밀번호로 UPDATE
+        char safe_new[129];
+        mysql_real_escape_string(db_conn, safe_new, new_pwd_hash.c_str(), new_pwd_hash.size());
+
+        char update_query[512];
+        snprintf(update_query, sizeof(update_query),
+            "UPDATE MEMBERSHIP SET PW = '%s' WHERE USER_NUM = %d",
+            safe_new, user_pk);
+
+        if (mysql_query(db_conn, update_query))
+        {
+            cerr << "[AuthDB Error] PW UPDATE 실패: " << mysql_error(db_conn) << endl;
+            return -1;
+        }
+
+        cout << "[Auth] 비밀번호 변경 성공: USER_NUM=" << user_pk << endl;
+        return 1;
     }
 
-    char safe_grade[64];
-    mysql_real_escape_string(db_conn, safe_grade, target_grade.c_str(), target_grade.size());
+    // =========================================================================
+    // [추가] 이름 변경
+    //
+    // ERD: NAME VARCHAR(5) → 5자 초과 입력 차단
+    //
+    // 파라미터:
+    //   user_pk  - 변경할 USER_NUM
+    //   new_name - 새 이름 (최대 5자, ERD 기준)
+    //
+    // 반환값: true=성공, false=실패
+    // =========================================================================
+    bool updateName(int user_pk, const string& new_name)
+    {
+        cout << "[Auth] updateName() 호출: user_pk=" << user_pk
+             << ", new_name=" << new_name << endl;
 
-    char query[256];
-    snprintf(query, sizeof(query),
-        "UPDATE MEMBERSHIP SET GRADE='%s' WHERE USER_NUM=%d", safe_grade, user_pk);
+        // [수정] ERD: NAME VARCHAR(5) → 5자 초과 시 거부
+        if (new_name.empty())
+        {
+            cerr << "[Auth] updateName: 이름이 비어 있음" << endl;
+            return false;
+        }
+        if (new_name.size() > 5)
+        {
+            cerr << "[Auth] updateName: 이름 5자 초과 (ERD 제한, 입력=" << new_name.size() << "자)" << endl;
+            return false;
+        }
 
-    if (mysql_query(db_conn, query) != 0) {
-        err = mysql_error(db_conn);
-        return false;
+        if (!ensureConnected())
+        {
+            cerr << "[AuthDB Error] updateName: DB 연결 불가" << endl;
+            return false;
+        }
+
+        // [수정] NAME VARCHAR(5) → 이스케이프 버퍼 11
+        char safe_name[11];
+        mysql_real_escape_string(db_conn, safe_name, new_name.c_str(), new_name.size());
+
+        char query[512];
+        snprintf(query, sizeof(query),
+            "UPDATE MEMBERSHIP SET NAME = '%s' WHERE USER_NUM = %d",
+            safe_name, user_pk);
+
+        if (mysql_query(db_conn, query))
+        {
+            cerr << "[AuthDB Error] NAME UPDATE 실패: " << mysql_error(db_conn) << endl;
+            return false;
+        }
+
+        if (mysql_affected_rows(db_conn) == 0)
+        {
+            cerr << "[AuthDB Error] updateName: USER_NUM=" << user_pk << " 없음" << endl;
+            return false;
+        }
+
+        cout << "[Auth] 이름 변경 성공: USER_NUM=" << user_pk << " → " << new_name << endl;
+        return true;
     }
-
-    err.clear();
-    return true;
-}
-// ===== [개인설정 DB 연동 함수 추가 끝] =====
-
-
-
-
 };
