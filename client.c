@@ -577,13 +577,27 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
                 }
                 else if (sub_ch == 2)
                 {
-                    char plain_pw[32];
-                    printf("  새로운 비밀번호 입력: ");
-                    scanf("%31s", plain_pw);
+                    char current_pw[32], new_pw[32];
+                    char current_hash[65], new_hash[65];
+                    char combined_data[131]; // 두 해시를 하나로 묶어 보낼 버퍼
+
+                    printf("  현재 비밀번호 입력: ");
+                    scanf("%31s", current_pw);
                     FLUSH_STDIN();
-                    // 💡 [핵심] 비밀번호는 반드시 클라이언트에서 해시화 후 전송!
-                    hash_password(plain_pw, input_data);
-                    request_user_settings(sock, user_pk, 2, input_data);
+                    hash_password(current_pw, current_hash);
+
+                    printf("  새로운 비밀번호 입력: ");
+                    scanf("%31s", new_pw);
+                    FLUSH_STDIN();
+                    hash_password(new_pw, new_hash);
+
+                    // 💡 [팁] 패킷의 new_data 필드(65자)에 두 데이터를 다 담기 어려우므로,
+                    // 두 해시를 구분자(예: '|')로 합쳐서 보내거나
+                    // 구조체를 확장하는 대신, 간단하게 두 번 연속 물어보는 로직으로 처리합니다.
+
+                    // 현재는 편의상 64자 해시 두 개를 붙여서 서버로 보낸다고 가정 (서버에서 쪼개기)
+                    sprintf(combined_data, "%s|%s", current_hash, new_hash);
+                    request_user_settings(sock, user_pk, 2, combined_data);
                 }
                 else if (sub_ch == 3)
                 {

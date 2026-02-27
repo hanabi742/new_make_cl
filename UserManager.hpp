@@ -86,20 +86,40 @@ public:
     // 2. 비밀번호 변경
     // 목적: 클라이언트에서 SHA-256으로 해싱되어 넘어온 새 비밀번호를 저장합니다.
     // ─────────────────────────────────────────────────────────────
-    bool updateUserPassword(int user_pk, const std::string &new_pwd_hash)
+    bool verifyAndUpdatePassword(int user_pk, const std::string& old_pwd_hash, const std::string& new_pwd_hash)
     {
-        if (!conn)
-            return false;
+        if (!conn) return false;
 
-        char query[256];
-        snprintf(query, sizeof(query), "UPDATE MEMBERSHIP SET PW = '%s' WHERE USER_NUM = %d", new_pwd_hash.c_str(), user_pk);
+        // [단계 1] 현재 비밀번호가 맞는지 먼저 확인 (로그인 로직 응용)
+        char check_query[256];
+        snprintf(check_query, sizeof(check_query), 
+                 "SELECT USER_NUM FROM MEMBERSHIP WHERE USER_NUM = %d AND PW = '%s'", 
+                 user_pk, old_pwd_hash.c_str());
 
-        if (mysql_query(conn, query))
+        if (mysql_query(conn, check_query) == 0) 
         {
-            std::cerr << "[User DB Error] 비밀번호 변경 실패: " << mysql_error(conn) << std::endl;
+            MYSQL_RES *result = mysql_store_result(conn);
+            if (!result || mysql_num_rows(result) == 0) 
+            {
+                std::cout << "[User System] 비밀번호 변경 거부: 현재 비밀번호 불일치 (PK: " << user_pk << ")" << std::endl;
+                if (result) mysql_free_result(result);
+                return false; // 비밀번호가 틀림
+            }
+            mysql_free_result(result);
+        }
+
+        // [단계 2] 맞다면 새 비밀번호로 업데이트
+        char update_query[256];
+        snprintf(update_query, sizeof(update_query), 
+                 "UPDATE MEMBERSHIP SET PW = '%s' WHERE USER_NUM = %d", 
+                 new_pwd_hash.c_str(), user_pk);
+
+        if (mysql_query(conn, update_query)) {
+            std::cerr << "[User DB Error] 업데이트 실패: " << mysql_error(conn) << std::endl;
             return false;
         }
-        std::cout << "[User System] 유저(PK: " << user_pk << ")의 비밀번호가 변경되었습니다." << std::endl;
+
+        std::cout << "[User System] 유저(PK: " << user_pk << ")의 비밀번호가 성공적으로 변경되었습니다." << std::endl;
         return true;
     }
 

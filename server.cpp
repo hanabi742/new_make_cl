@@ -407,9 +407,17 @@ int main()
                 {
                     success = user_mgr.updateUserName(req->user_pk, req->new_data);
                 }
-                else if (req->setting_type == 2)
+                else if (req->setting_type == 2) //현재 비밀번호 확인후 비밀번호 변경 로직
                 {
-                    success = user_mgr.updateUserPassword(req->user_pk, req->new_data);
+                    // combined_data에서 "기존해시|새해시" 분리
+                    string data = req->new_data;
+                    size_t pos = data.find('|');
+                    if (pos != string::npos)
+                    {
+                        string old_h = data.substr(0, pos);
+                        string new_h = data.substr(pos + 1);
+                        success = user_mgr.verifyAndUpdatePassword(req->user_pk, old_h, new_h);
+                    }
                 }
 
                 FilePacket res = {};
