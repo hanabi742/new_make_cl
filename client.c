@@ -539,7 +539,7 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
         printf("  ╔══════════════════════════════════╗\n");
         printf("  ║     ⚙️   설정 (Settings)         ║\n");
         printf("  ╠══════════════════════════════════╣\n");
-        printf("  ║  1. 개인 설정 (미구현)           ║\n");
+        printf("  ║  1. 개인 설정                    ║\n");
         printf("  ║  2. 메시지 설정 (미구현)         ║\n");
         printf("  ║  3. 등급 설정 (용량 확장)        ║\n");
         printf("  ║  4. 내 폴더 삭제 (계정 탈퇴)     ║\n");
