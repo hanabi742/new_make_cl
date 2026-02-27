@@ -324,9 +324,15 @@ inline void menu_send() {
             char msg[256];
             json_get_str(res, "message", msg, sizeof(msg));
             color_red();
-            printf("전송 실패: %s\n", msg);
+            if (strcmp(msg, "Blocked by recipient") == 0)
+                printf("전송 실패: 상대방이 당신을 차단했습니다.\n");
+            else
+                printf("전송 실패: %s\n", msg);
             color_reset();
         }
+        printf("\n[Enter] 계속...");
+        fflush(stdout);
+        int _c; while ((_c = getchar()) != '\n' && _c != EOF);
     }
 }
 

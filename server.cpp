@@ -11,6 +11,24 @@
 #include "MsgServerLogic.hpp" // 메시지 서버 (포트 9001)
 #include "UserManager.hpp"
 #include "AdminManager.hpp"
+#include "BlacklistManager.hpp" // [추가 - 재훈]
+
+// [추가 - 재훈] 블랙리스트 전용 패킷 구조체
+#pragma pack(push, 1)
+struct BlacklistReqPacket {
+    int16_t type;
+    int32_t self_user_num;
+    int32_t blacklist_num;
+    char    target_email[128];
+};
+struct BlacklistResPacket {
+    int16_t type;
+    int32_t result_code;
+    int32_t blacklist_num;
+    char    target_email[128];
+    char    created_at[20];
+};
+#pragma pack(pop)
 
 using namespace std;
 using namespace std::filesystem;
@@ -53,6 +71,8 @@ int main()
     // UserManager와 AdminManager 생성 (의존성 주입)
     UserManager user_mgr(auth, storage);
     AdminManager admin(auth, storage);
+    admin.setClientList(&client_sockets, &v_mtx);
+    BlacklistManager blacklist_mgr; // [추가 - 재훈]
     cout << "[Server] 모든 매니저 초기화 완료." << endl;
 
     // 메시지 서버 별도 스레드로 실행 (포트 9001)
@@ -108,12 +128,57 @@ int main()
                 }
                 else if (packet_type == PKT_REQ_USER_SETTINGS)
                 {
-                    target_size = sizeof(UserSettingsPacket);   // 유저 설정 변경 패킷 사이즈 할당
+                    target_size = sizeof(UserSettingsPacket);
+                }
+                else if (packet_type == 500 || packet_type == 502 || packet_type == 504)
+                {
+                    target_size = sizeof(BlacklistReqPacket); // [추가 - 재훈]
                 }
 
                 int recv_len = recv_all(client_sock, (char *)packet, target_size);
                 if (recv_len <= 0)
                     break;
+
+                // [추가 - 재훈] 블랙리스트: PacketType enum에 없으므로 switch 전에 처리
+                if (packet->type == 500 || packet->type == 502 || packet->type == 504)
+                {
+                    BlacklistReqPacket *bl_req = (BlacklistReqPacket *)packet;
+                    if (packet->type == 500)
+                    {
+                        int result = blacklist_mgr.addBlacklist(bl_req->self_user_num, bl_req->target_email);
+                        BlacklistResPacket res = {};
+                        res.type        = 501;
+                        res.result_code = result;
+                        send(client_sock, (char *)&res, sizeof(res), 0);
+                    }
+                    else if (packet->type == 502)
+                    {
+                        int result = blacklist_mgr.removeBlacklist(bl_req->self_user_num, bl_req->blacklist_num);
+                        BlacklistResPacket res = {};
+                        res.type        = 503;
+                        res.result_code = result;
+                        send(client_sock, (char *)&res, sizeof(res), 0);
+                    }
+                    else if (packet->type == 504)
+                    {
+                        auto list = blacklist_mgr.getMyBlacklist(bl_req->self_user_num);
+                        for (const auto &entry : list)
+                        {
+                            BlacklistResPacket res = {};
+                            res.type          = 505;
+                            res.result_code   = 1;
+                            res.blacklist_num = entry.blacklist_num;
+                            strncpy(res.target_email, entry.target_email.c_str(), sizeof(res.target_email) - 1);
+                            strncpy(res.created_at,   entry.created_at.c_str(),   sizeof(res.created_at)   - 1);
+                            send(client_sock, (char *)&res, sizeof(res), 0);
+                        }
+                        BlacklistResPacket end_res = {};
+                        end_res.type = 506;
+                        send(client_sock, (char *)&end_res, sizeof(end_res), 0);
+                    }
+                    continue; // switch 건너뜀
+                }
+                // [추가 끝 - 재훈]
 
                 switch (static_cast<PacketType>(packet->type))
                 {

@@ -12,9 +12,17 @@ class AdminManager
 private:
     AuthManager &auth;
     StorageManager &storage;
-    MYSQL *conn; // 관리자 전용 DB 커넥션 (독립적인 작업 보장)
+    MYSQL *conn;
+
+    std::vector<int> *client_sockets = nullptr;
+    std::mutex *v_mtx = nullptr;
 
 public:
+    void setClientList(std::vector<int> *sockets, std::mutex *mtx)
+    {
+        client_sockets = sockets;
+        v_mtx = mtx;
+    }
     AdminManager(AuthManager &a, StorageManager &s) : auth(a), storage(s)
     {
         conn = mysql_init(NULL);

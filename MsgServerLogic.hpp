@@ -21,6 +21,7 @@
 
 #include "msg_protocol.hpp"
 #include "DBConfig.hpp"
+#include "BlacklistManager.hpp" // [추가 - 재훈] 블랙리스트 필터링
 
 // ============================================================
 //  간이 JSON 빌더 / 파서
@@ -248,7 +249,27 @@ namespace MsgHandler {
             NetHelper::sendPacket(sock, out);
             return;
         }
+
+        // [추가 - 재훈] 수신자 USER_NUM 저장 후 블랙리스트 체크
+        MYSQL_ROW crow = mysql_fetch_row(cres);
+        int receiver_num = (crow && crow[0]) ? atoi(crow[0]) : -1;
+        int sender_num   = atoi(sender_num_str.c_str());
         mysql_free_result(cres);
+
+        BlacklistManager bl_checker;
+        if (bl_checker.isBlocked(receiver_num, sender_num))
+        {
+            std::cerr << "[MsgHandler] 차단된 사용자의 메시지 거부: sender=" << sender_num
+                      << " → receiver=" << receiver_num << std::endl;
+            std::string out = SimpleJSON::Builder()
+                .str(MSG_FIELD::TYPE,    MSG_RES::SEND)
+                .str(MSG_FIELD::RESULT,  MSG_RESULT::FAIL)
+                .str(MSG_FIELD::MESSAGE, "Blocked by recipient")
+                .build();
+            NetHelper::sendPacket(sock, out);
+            return;
+        }
+        // [추가 끝 - 재훈]
 
         std::string safe_content = DBHelper::escape(db, content);
 
