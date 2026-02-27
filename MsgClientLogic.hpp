@@ -44,10 +44,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include "DBConfig.hpp"  // SERVER_IP, SERVER_PORT_MSG 사용
 
 // ── 상수 ─────────────────────────────────────────────────────
-#define SERVER_IP       "127.0.0.1"
-#define SERVER_PORT     9001
+// SERVER_IP는 DBConfig.hpp에서 가져옴
+#define SERVER_PORT     SERVER_PORT_MSG  // 9001
 #define MAX_BODY        65536
 #define MAX_CONTENT     1024
 #define HISTORY_MAX     10
@@ -324,15 +325,9 @@ inline void menu_send() {
             char msg[256];
             json_get_str(res, "message", msg, sizeof(msg));
             color_red();
-            if (strcmp(msg, "Blocked by recipient") == 0)
-                printf("전송 실패: 상대방이 당신을 차단했습니다.\n");
-            else
-                printf("전송 실패: %s\n", msg);
+            printf("전송 실패: %s\n", msg);
             color_reset();
         }
-        printf("\n[Enter] 계속...");
-        fflush(stdout);
-        int _c; while ((_c = getchar()) != '\n' && _c != EOF);
     }
 }
 

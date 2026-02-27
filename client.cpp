@@ -4,7 +4,6 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <openssl/sha.h>
-#include <termios.h>
 #include "Protocol.hpp"
 #include "msg_client.h"
 #include "UserManager.hpp"
@@ -101,25 +100,6 @@ void check_storage_quota(int sock, int user_pk)
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-// 블랙리스트 전용 패킷 구조체
-// ─────────────────────────────────────────────────────────────
-#pragma pack(push, 1)
-struct BlacklistReqPacket {
-    int16_t type;               // 500=추가, 502=삭제, 504=목록조회
-    int32_t self_user_num;
-    int32_t blacklist_num;      // 삭제 시 사용
-    char    target_email[128];  // 추가 시 사용
-};
-struct BlacklistResPacket {
-    int16_t type;               // 501=추가결과, 503=삭제결과, 505=목록항목, 506=목록끝
-    int32_t result_code;
-    int32_t blacklist_num;
-    char    target_email[128];
-    char    created_at[20];
-};
-#pragma pack(pop)
-
 void hash_password(const char *plain, char *out)
 {
     unsigned char hash[SHA256_DIGEST_LENGTH];
@@ -130,172 +110,6 @@ void hash_password(const char *plain, char *out)
     for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
         sprintf(out + i * 2, "%02x", hash[i]);
     out[64] = '\0';
-}
-
-// ─────────────────────────────────────────────────────────────
-// 비밀번호 * 표시 입력
-// ─────────────────────────────────────────────────────────────
-void input_password(const char *prompt, char *buf, int max_len)
-{
-    struct termios oldt, newt;
-    tcgetattr(STDIN_FILENO, &oldt);
-    newt = oldt;
-    newt.c_lflag &= ~(ECHO | ICANON);
-    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-
-    printf("%s", prompt);
-    fflush(stdout);
-
-    int i = 0, c;
-    while ((c = getchar()) != '\n' && c != EOF && i < max_len - 1)
-    {
-        if (c == 127 || c == '\b')
-        {
-            if (i > 0) { i--; printf("\b \b"); fflush(stdout); }
-        }
-        else { buf[i++] = (char)c; printf("*"); fflush(stdout); }
-    }
-    buf[i] = '\0';
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-    printf("\n");
-}
-
-// ─────────────────────────────────────────────────────────────
-// 비밀번호 유효성 검사: 영문+숫자 혼합, 5~15자
-// ─────────────────────────────────────────────────────────────
-int validate_password(const char *pw)
-{
-    int len = (int)strlen(pw);
-    if (len < 5 || len > 15) { printf("  [Error] 비밀번호는 5~15자여야 합니다.\n"); return 0; }
-    int has_alpha = 0, has_digit = 0;
-    for (int i = 0; i < len; i++)
-    {
-        if ((pw[i]>='a'&&pw[i]<='z')||(pw[i]>='A'&&pw[i]<='Z')) has_alpha = 1;
-        else if (pw[i]>='0'&&pw[i]<='9') has_digit = 1;
-        else { printf("  [Error] 영문자와 숫자만 사용할 수 있습니다.\n"); return 0; }
-    }
-    if (!has_alpha || !has_digit) { printf("  [Error] 영문자와 숫자를 반드시 혼합해야 합니다.\n"); return 0; }
-    return 1;
-}
-
-// ─────────────────────────────────────────────────────────────
-// 블랙리스트: 차단 추가
-// ─────────────────────────────────────────────────────────────
-void bl_add(int sock, int user_pk)
-{
-    struct BlacklistReqPacket req;
-    memset(&req, 0, sizeof(req));
-    req.type = 500;
-    req.self_user_num = user_pk;
-
-    printf("  차단할 상대방 이메일: ");
-    scanf("%127s", req.target_email);
-    FLUSH_STDIN();
-
-    send(sock, (char *)&req, sizeof(req), 0);
-
-    struct BlacklistResPacket res;
-    memset(&res, 0, sizeof(res));
-    if (recv_all(sock, (char *)&res, sizeof(res)) > 0)
-    {
-        if      (res.result_code ==  1) printf("  [Success] 차단 완료!\n");
-        else if (res.result_code ==  0) printf("  [Error] 존재하지 않는 이메일입니다.\n");
-        else if (res.result_code == -1) printf("  [Error] 자기 자신은 차단할 수 없습니다.\n");
-        else if (res.result_code == -2) printf("  [Error] 이미 차단된 사용자입니다.\n");
-        else                            printf("  [Error] 서버 오류\n");
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-// 블랙리스트: 목록 출력 (BL_PK 반환 목적 겸용)
-// ─────────────────────────────────────────────────────────────
-void bl_print_list(int sock, int user_pk)
-{
-    struct BlacklistReqPacket req;
-    memset(&req, 0, sizeof(req));
-    req.type = 504;
-    req.self_user_num = user_pk;
-    send(sock, (char *)&req, sizeof(req), 0);
-
-    printf("\n  %-6s | %-30s | %s\n", "BL_PK", "이메일", "차단일시");
-    printf("  -------------------------------------------------------\n");
-
-    int count = 0;
-    struct BlacklistResPacket res;
-    while (1)
-    {
-        memset(&res, 0, sizeof(res));
-        if (recv_all(sock, (char *)&res, sizeof(res)) <= 0) break;
-        if (res.type == 506) break;   // 목록 끝
-        if (res.type == 505)
-        {
-            printf("  %-6d | %-30s | %s\n",
-                   res.blacklist_num, res.target_email, res.created_at);
-            count++;
-        }
-    }
-    if (count == 0) printf("  차단된 사용자가 없습니다.\n");
-    printf("  -------------------------------------------------------\n");
-}
-
-// ─────────────────────────────────────────────────────────────
-// 블랙리스트: 차단 해제
-// ─────────────────────────────────────────────────────────────
-void bl_remove(int sock, int user_pk)
-{
-    bl_print_list(sock, user_pk);
-
-    printf("  해제할 BL_PK (취소: 0): ");
-    int bl_pk;
-    scanf("%d", &bl_pk);
-    FLUSH_STDIN();
-    if (bl_pk == 0) return;
-
-    struct BlacklistReqPacket req;
-    memset(&req, 0, sizeof(req));
-    req.type = 502;
-    req.self_user_num = user_pk;
-    req.blacklist_num = bl_pk;
-    send(sock, (char *)&req, sizeof(req), 0);
-
-    struct BlacklistResPacket res;
-    memset(&res, 0, sizeof(res));
-    if (recv_all(sock, (char *)&res, sizeof(res)) > 0)
-    {
-        if (res.result_code == 1) printf("  [Success] 차단 해제 완료!\n");
-        else                      printf("  [Error] 해당 항목이 없거나 권한 없음\n");
-    }
-}
-
-// ─────────────────────────────────────────────────────────────
-// 블랙리스트 서브메뉴
-// ─────────────────────────────────────────────────────────────
-void menu_blacklist(int sock, int user_pk)
-{
-    while (1)
-    {
-        CLEAR();
-        printf("  ╔══════════════════════════════════╗\n");
-        printf("  ║       🚫 블랙리스트 관리          ║\n");
-        printf("  ╠══════════════════════════════════╣\n");
-        printf("  ║  1. 차단 추가                    ║\n");
-        printf("  ║  2. 차단 목록 확인               ║\n");
-        printf("  ║  3. 차단 해제                    ║\n");
-        printf("  ║  0. 돌아가기                     ║\n");
-        printf("  ╚══════════════════════════════════╝\n");
-        printf("  선택: ");
-
-        int ch;
-        if (scanf("%d", &ch) != 1) { FLUSH_STDIN(); continue; }
-        FLUSH_STDIN();
-        CLEAR();
-
-        if      (ch == 1) { bl_add(sock, user_pk);        PAUSE(); }
-        else if (ch == 2) { bl_print_list(sock, user_pk); PAUSE(); }
-        else if (ch == 3) { bl_remove(sock, user_pk);     PAUSE(); }
-        else if (ch == 0) return;
-        else { printf("  [Error] 0~3 중 선택하세요.\n"); PAUSE(); }
-    }
 }
 void delete_file(int sock, int user_pk, int file_pk)
 {
@@ -762,7 +576,6 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
         printf("  ║  3. 등급 설정 (용량 확장)        ║\n");
         printf("  ║  4. 내 폴더 삭제 (계정 탈퇴)     ║\n");
         printf("  ║  5. 로그아웃                     ║\n");
-        printf("  ║  6. 🚫 블랙리스트 관리           ║\n");
         printf("  ║  0. 돌아가기                     ║\n");
         printf("  ╚══════════════════════════════════╝\n");
         printf("  (%s)\n", email);
@@ -802,12 +615,14 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
                     char current_hash[65], new_hash[65];
                     char combined_data[131]; // 두 해시를 하나로 묶어 보낼 버퍼
 
-                    input_password("  현재 비밀번호 입력: ", current_pw, 32);
+                    printf("  현재 비밀번호 입력: ");
+                    scanf("%31s", current_pw);
+                    FLUSH_STDIN();
                     hash_password(current_pw, current_hash);
 
-                    do {
-                        input_password("  새로운 비밀번호 입력 (영문+숫자 혼합 5~15자): ", new_pw, 32);
-                    } while (!validate_password(new_pw));
+                    printf("  새로운 비밀번호 입력: ");
+                    scanf("%31s", new_pw);
+                    FLUSH_STDIN();
                     hash_password(new_pw, new_hash);
 
                     // 💡 [팁] 패킷의 new_data 필드(65자)에 두 데이터를 다 담기 어려우므로,
@@ -937,10 +752,6 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
             *should_logout = 1;
             return;
         }
-        else if (ch == 6)
-        {
-            menu_blacklist(sock, user_pk);
-        }
         else if (ch == 0)
         {
             CLEAR();
@@ -948,7 +759,7 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
         }
         else
         {
-            printf("  [Error] 0~6 중 선택하세요.\n");
+            printf("  [Error] 0~5 중 선택하세요.\n");
             PAUSE();
         }
     }
@@ -1100,9 +911,11 @@ void admin_menu(int sock, int admin_pk) {
 // ═══════════════════════════════════════════════════════════
 //  main
 // ═══════════════════════════════════════════════════════════
-int main()
+int main(int argc, char *argv[])
 {
-    const char *target_ip = SERVER_IP;
+    // 실행 시 인자로 IP 지정 가능: ./client 10.10.20.101
+    // 없으면 DBConfig.hpp의 SERVER_IP 사용
+    const char *target_ip = (argc >= 2) ? argv[1] : SERVER_IP;
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
@@ -1163,9 +976,9 @@ int main()
                 printf("  이름: ");
                 scanf("%9s", username);
                 FLUSH_STDIN();
-                do {
-                    input_password("  비밀번호 (영문+숫자 혼합 5~15자): ", pw, 32);
-                } while (!validate_password(pw));
+                printf("  비밀번호: ");
+                scanf("%31s", pw);
+                FLUSH_STDIN();
                 int pk = request_auth(sock, PKT_REQ_REGISTER, email, pw, username);
                 if (pk > 0)
                 {
@@ -1185,7 +998,9 @@ int main()
             printf("  이메일: ");
             scanf("%63s", email);
             FLUSH_STDIN();
-            input_password("  비밀번호: ", pw, 32);
+            printf("  비밀번호: ");
+            scanf("%31s", pw);
+            FLUSH_STDIN();
             user_pk = request_auth(sock, PKT_REQ_LOGIN, email, pw, "");
             if (user_pk > 0)
             {

@@ -35,7 +35,7 @@ private:
         if (conn && mysql_ping(conn) != 0)
         {
             std::cout << "[Storage] DB 연결 끊김 감지. 재연결 시도..." << std::endl;
-            mysql_real_connect(conn, SERVER_IP, DB_USER, "1234", "USERS", 0, NULL, 0);
+            mysql_real_connect(conn, DB_HOST, DB_USER, DB_PASS, DB_NAME, 0, NULL, 0);
         }
     }
 
@@ -84,7 +84,7 @@ public:
         server_root = fs::path(STORAGE_ROOT) / "server";
 
         conn = mysql_init(NULL);
-        if (mysql_real_connect(conn, SERVER_IP, DB_USER, "1234", "USERS", 0, NULL, 0) == NULL)
+        if (mysql_real_connect(conn, DB_HOST, DB_USER, DB_PASS, DB_NAME, 0, NULL, 0) == NULL)
         {
             cerr << "[Storage DB Error] " << mysql_error(conn) << endl;
             conn = nullptr;
