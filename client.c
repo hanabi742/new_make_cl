@@ -6,6 +6,9 @@
 #include <openssl/sha.h>
 #include "Protocol.hpp"
 #include "msg_client.h"
+#include "UserManager.hpp"
+#include "AdminManager.hpp"
+
 #define OPENSSL_API_COMPAT 0x30000000L
 
 // ═══════════════════════════════════════════════════════════
