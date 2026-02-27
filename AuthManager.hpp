@@ -24,11 +24,11 @@ private:
     json user_db;
     int next_pk;
 
-    map<string, string>            email_auth_codes;
+    map<string, string> email_auth_codes;
     map<string, pair<int, time_t>> login_attempts;
-    set<string>                    verified_emails;
+    set<string> verified_emails;
 
-    MYSQL* db_conn;
+    MYSQL *db_conn;
 
     // ── DB 연결 초기화 ────────────────────────────────────────────────────────
     bool initDB()
@@ -77,7 +77,7 @@ private:
     // [핵심] DB MEMBERSHIP 기준으로 이메일 존재 여부 확인
     // DB에서 DELETE하면 false 반환 → 재가입 허용
     // ─────────────────────────────────────────────────────────────────────────
-    bool isEmailExistsInDB(const string& id)
+    bool isEmailExistsInDB(const string &id)
     {
         if (!ensureConnected())
         {
@@ -90,7 +90,7 @@ private:
 
         char query[256];
         snprintf(query, sizeof(query),
-            "SELECT COUNT(*) FROM MEMBERSHIP WHERE ID = '%s'", safe_id);
+                 "SELECT COUNT(*) FROM MEMBERSHIP WHERE ID = '%s'", safe_id);
 
         if (mysql_query(db_conn, query))
         {
@@ -98,7 +98,7 @@ private:
             return false;
         }
 
-        MYSQL_RES* result = mysql_store_result(db_conn);
+        MYSQL_RES *result = mysql_store_result(db_conn);
         if (!result)
         {
             cerr << "[AuthDB Error] store_result 실패: " << mysql_error(db_conn) << endl;
@@ -116,7 +116,7 @@ private:
     // [핵심 수정] MEMBERSHIP INSERT → 생성된 실제 USER_NUM 반환
     // 기존: bool 반환(USER_NUM 버림) → 변경: int 반환
     // ─────────────────────────────────────────────────────────────────────────
-    int insertMembership(const string& id, const string& pwd_hash, const string& name)
+    int insertMembership(const string &id, const string &pwd_hash, const string &name)
     {
         cout << "[AuthDB] insertMembership() 호출: id=" << id << ", name=" << name << endl;
 
@@ -130,14 +130,14 @@ private:
         char safe_hash[129];
         char safe_name[61];
 
-        mysql_real_escape_string(db_conn, safe_id,   id.c_str(),       id.size());
+        mysql_real_escape_string(db_conn, safe_id, id.c_str(), id.size());
         mysql_real_escape_string(db_conn, safe_hash, pwd_hash.c_str(), pwd_hash.size());
-        mysql_real_escape_string(db_conn, safe_name, name.c_str(),     name.size());
+        mysql_real_escape_string(db_conn, safe_name, name.c_str(), name.size());
 
         char query[512];
         snprintf(query, sizeof(query),
-            "INSERT INTO MEMBERSHIP (ID, PW, NAME) VALUES ('%s', '%s', '%s')",
-            safe_id, safe_hash, safe_name);
+                 "INSERT INTO MEMBERSHIP (ID, PW, NAME) VALUES ('%s', '%s', '%s')",
+                 safe_id, safe_hash, safe_name);
 
         cout << "[AuthDB] INSERT 쿼리 실행 중..." << endl;
 
@@ -155,7 +155,7 @@ private:
     }
 
     // ── DB에서 ID+PW로 실제 USER_NUM 조회 (로그인용) ─────────────────────────
-    int queryUserNumFromDB(const string& id, const string& pwd_hash)
+    int queryUserNumFromDB(const string &id, const string &pwd_hash)
     {
         cout << "[AuthDB] queryUserNumFromDB() 호출: id=" << id << endl;
 
@@ -167,13 +167,13 @@ private:
 
         char safe_id[51];
         char safe_hash[129];
-        mysql_real_escape_string(db_conn, safe_id,   id.c_str(),       id.size());
+        mysql_real_escape_string(db_conn, safe_id, id.c_str(), id.size());
         mysql_real_escape_string(db_conn, safe_hash, pwd_hash.c_str(), pwd_hash.size());
 
         char query[512];
         snprintf(query, sizeof(query),
-            "SELECT USER_NUM FROM MEMBERSHIP WHERE ID='%s' AND PW='%s'",
-            safe_id, safe_hash);
+                 "SELECT USER_NUM FROM MEMBERSHIP WHERE ID='%s' AND PW='%s'",
+                 safe_id, safe_hash);
 
         if (mysql_query(db_conn, query))
         {
@@ -181,7 +181,7 @@ private:
             return -1;
         }
 
-        MYSQL_RES* result = mysql_store_result(db_conn);
+        MYSQL_RES *result = mysql_store_result(db_conn);
         if (!result)
         {
             cerr << "[AuthDB Error] store_result 실패: " << mysql_error(db_conn) << endl;
@@ -189,7 +189,7 @@ private:
         }
 
         MYSQL_ROW row = mysql_fetch_row(result);
-        int user_num  = (row && row[0]) ? atoi(row[0]) : -1;
+        int user_num = (row && row[0]) ? atoi(row[0]) : -1;
         mysql_free_result(result);
 
         if (user_num > 0)
@@ -201,7 +201,11 @@ private:
     }
 
     // ── libcurl 이메일 전송 ───────────────────────────────────────────────────
-    struct WriteThis { const char *readptr; size_t sizeleft; };
+    struct WriteThis
+    {
+        const char *readptr;
+        size_t sizeleft;
+    };
 
     static size_t payload_source(void *ptr, size_t size, size_t nmemb, void *userp)
     {
@@ -210,9 +214,10 @@ private:
         if (upload->sizeleft)
         {
             size_t copy = upload->sizeleft;
-            if (copy > len) copy = len;
+            if (copy > len)
+                copy = len;
             memcpy(ptr, upload->readptr, copy);
-            upload->readptr  += copy;
+            upload->readptr += copy;
             upload->sizeleft -= copy;
             return copy;
         }
@@ -221,32 +226,34 @@ private:
 
     bool sendMailViaCurl(const string &target_email, const string &auth_code)
     {
-        string my_email     = MAIL_FROM_ADDR;
+        string my_email = MAIL_FROM_ADDR;
         string app_password = MAIL_APP_PASS;
 
         string payload_text =
-            "To: "   + target_email + "\r\n" +
-            "From: " + my_email     + "\r\n" +
+            "To: " + target_email + "\r\n" +
+            "From: " + my_email + "\r\n" +
             "Subject: [4erign Cloud] Verification Code\r\n"
             "\r\n"
-            "안녕하세요 4(for)eign Cloud 입니다. \n인증번호는: " + auth_code + "\r\n"
-            ".\r\n";
+            "안녕하세요 4(for)eign Cloud 입니다. \n인증번호는: " +
+            auth_code + "\r\n"
+                        ".\r\n";
 
         WriteThis upload_data = {payload_text.c_str(), payload_text.size()};
         CURL *curl = curl_easy_init();
-        if (!curl) return false;
+        if (!curl)
+            return false;
 
-        curl_easy_setopt(curl, CURLOPT_URL,          "smtps://smtp.gmail.com:465");
-        curl_easy_setopt(curl, CURLOPT_USERNAME,     my_email.c_str());
-        curl_easy_setopt(curl, CURLOPT_PASSWORD,     app_password.c_str());
-        curl_easy_setopt(curl, CURLOPT_MAIL_FROM,    ("<" + my_email + ">").c_str());
+        curl_easy_setopt(curl, CURLOPT_URL, "smtps://smtp.gmail.com:465");
+        curl_easy_setopt(curl, CURLOPT_USERNAME, my_email.c_str());
+        curl_easy_setopt(curl, CURLOPT_PASSWORD, app_password.c_str());
+        curl_easy_setopt(curl, CURLOPT_MAIL_FROM, ("<" + my_email + ">").c_str());
 
         struct curl_slist *recipients =
             curl_slist_append(NULL, ("<" + target_email + ">").c_str());
-        curl_easy_setopt(curl, CURLOPT_MAIL_RCPT,    recipients);
+        curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
         curl_easy_setopt(curl, CURLOPT_READFUNCTION, payload_source);
-        curl_easy_setopt(curl, CURLOPT_READDATA,     &upload_data);
-        curl_easy_setopt(curl, CURLOPT_UPLOAD,       1L);
+        curl_easy_setopt(curl, CURLOPT_READDATA, &upload_data);
+        curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
 
         CURLcode res = curl_easy_perform(curl);
         curl_slist_free_all(recipients);
@@ -266,7 +273,8 @@ private:
             for (auto &[id, info] : user_db.items())
             {
                 int current_pk = info["user_pk"];
-                if (current_pk >= next_pk) next_pk = current_pk + 1;
+                if (current_pk >= next_pk)
+                    next_pk = current_pk + 1;
             }
         }
         else
@@ -301,7 +309,11 @@ public:
 
     ~AuthManager()
     {
-        if (db_conn) { mysql_close(db_conn); db_conn = nullptr; }
+        if (db_conn)
+        {
+            mysql_close(db_conn);
+            db_conn = nullptr;
+        }
     }
 
     bool verifyEmail(const string &email, const string &input_code)
@@ -438,5 +450,83 @@ public:
             }
             return -1;
         }
+    }
+    long long getUserMaxStorage(int user_num)
+    {
+        // DB 연결이 안 되어있거나 오류 시 기본 용량(10MB) 제공
+        if (!ensureConnected())
+            return 10LL * 1024 * 1024;
+
+        char query[256];
+        snprintf(query, sizeof(query),
+                 "SELECT GRADE FROM MEMBERSHIP WHERE USER_NUM = %d", user_num);
+
+        if (mysql_query(db_conn, query))
+        {
+            cerr << "[DB Error] 등급 조회 실패: " << mysql_error(db_conn) << endl;
+            return 10LL * 1024 * 1024; // 에러 시 기본 10MB 반환
+        }
+
+        MYSQL_RES *result = mysql_store_result(db_conn);
+        if (!result)
+            return 10LL * 1024 * 1024;
+
+        MYSQL_ROW row = mysql_fetch_row(result);
+        string grade = "일반"; // 기본값
+        if (row && row[0])
+        {
+            grade = row[0];
+        }
+        mysql_free_result(result);
+
+        // 💡 등급별 용량 설정 로직 (원하는 용량으로 자유롭게 수정하세요)
+        if (grade == "일반")
+        {
+            return 100LL * 1024 * 1024; // 일반: 100MB
+        }
+        else if (grade == "비지니스")
+        {
+            return 200LL * 1024 * 1024; // 비지니스: 200MB
+        }
+        else if (grade == "VIP")
+        {
+            return 500LL * 1024 * 1024; // VIP: 500MB
+        }
+        else if (grade == "VVIP")
+        {
+            // 1GB는 MB에 1024를 한 번 더 곱해줍니다.
+            // 1 * 1024(MB) * 1024(KB) * 1024(Byte)
+            return 1024LL * 1024 * 1024; // VVIP: 1GB
+        }
+
+        // 예외 상황 발생 시 기본값 (안전을 위해 일반 등급 부여)
+        return 100LL * 1024 * 1024;
+
+        // 기본 '일반' 등급
+        return 10LL * 1024 * 1024; // 일반: 10MB
+    }
+    bool upgradeUserGrade(int user_num, const string &new_grade)
+    {
+        if (!ensureConnected())
+            return false;
+
+        char safe_grade[51];
+        mysql_real_escape_string(db_conn, safe_grade, new_grade.c_str(), new_grade.size());
+
+        char query[256];
+        snprintf(query, sizeof(query),
+                 "UPDATE MEMBERSHIP SET GRADE = '%s' WHERE USER_NUM = %d",
+                 safe_grade, user_num);
+
+        if (mysql_query(db_conn, query))
+        {
+            cerr << "[DB Error] 등급 업데이트 실패: " << mysql_error(db_conn) << endl;
+            return false;
+        }
+
+        cout << "[System] USER_NUM: " << user_num
+             << " 등급이 '" << new_grade << "'(으)로 변경되었습니다." << endl;
+
+        return true;
     }
 };

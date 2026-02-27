@@ -35,7 +35,6 @@ namespace fs = std::filesystem;
 #define MAX_PACKET_SIZE (64 * 1024)
 #define STORAGE_ROOT "./storage"
 
-
 /* 5. 패킷 타입 정의 (enum 사용) */
 typedef enum
 {
@@ -45,19 +44,19 @@ typedef enum
     PKT_REQ_UPLOAD_CHUNK = 3,
     PKT_REQ_UPLOAD_END = 4,
     PKT_RES_UPLOAD_END = 5,
-    PKT_REQ_DOWNLOAD_START = 6, 
-    PKT_RES_DOWNLOAD_START = 7, 
-    PKT_RES_DOWNLOAD_DATA = 8,  
+    PKT_REQ_DOWNLOAD_START = 6,
+    PKT_RES_DOWNLOAD_START = 7,
+    PKT_RES_DOWNLOAD_DATA = 8,
 
     // --- 인증 및 이메일 (10~23) ---
-    PKT_REQ_REGISTER = 10, 
-    PKT_RES_REGISTER = 11, 
-    PKT_REQ_LOGIN = 12,    
-    PKT_RES_LOGIN = 13,    
-    PKT_REQ_EMAIL_AUTH = 20,   
-    PKT_RES_EMAIL_AUTH = 21,   
-    PKT_REQ_EMAIL_VERIFY = 22, 
-    PKT_RES_EMAIL_VERIFY = 23, 
+    PKT_REQ_REGISTER = 10,
+    PKT_RES_REGISTER = 11,
+    PKT_REQ_LOGIN = 12,
+    PKT_RES_LOGIN = 13,
+    PKT_REQ_EMAIL_AUTH = 20,
+    PKT_RES_EMAIL_AUTH = 21,
+    PKT_REQ_EMAIL_VERIFY = 22,
+    PKT_RES_EMAIL_VERIFY = 23,
 
     // --- 파일 관리 확장 (40~46) ---
     PKT_REQ_LIST = 40,          // 목록 요청
@@ -69,29 +68,32 @@ typedef enum
     PKT_RES_DELETE_FOLDER = 46, // 폴더 삭제 결과
 
     // --- 관리자 및 설정, 용량 조회 (100~311) ---
-    PKT_RES_HANDSHAKE = 100, 
-    PKT_REQ_ADMIN_NOTICE = 200, 
-    PKT_REQ_ADMIN_BAN = 201,    
-    PKT_REQ_ADMIN_RESET = 202,  
-    PKT_REQ_ADMIN_USAGE = 203,  
-    PKT_REQ_USER_SETTINGS = 300, 
-    PKT_RES_USER_SETTINGS = 301, 
+    PKT_RES_HANDSHAKE = 100,
+    PKT_REQ_ADMIN_NOTICE = 200,
+    PKT_REQ_ADMIN_BAN = 201,
+    PKT_REQ_ADMIN_RESET = 202,
+    PKT_REQ_ADMIN_USAGE = 203,
+    PKT_REQ_USER_SETTINGS = 300,
+    PKT_RES_USER_SETTINGS = 301,
     PKT_REQ_STORAGE_INFO = 310, // 용량 정보 요청
-    PKT_RES_STORAGE_INFO = 311  // 용량 정보 응답
+    PKT_RES_STORAGE_INFO = 311, // 용량 정보 응답
+
+    PKT_REQ_UPGRADE_GRADE = 320,
+    PKT_RES_UPGRADE_GRADE = 321
 } PacketType;
 
 /* 6. 패킷 구조체 (1바이트 정렬) */
 #pragma pack(push, 1)
 struct FilePacket
 {
-    int16_t type;      // PacketType
-    int32_t user_pk;   // 유저 PK
-    int32_t file_pk;   // 파일 PK (업로드 시 서버가 발급, 다운로드 시 클라이언트가 요청)
-    long offset;       // 파일의 어느 위치부터 데이터를 담고 있는지 나타내는 필드입니다. 업로드 시에는 0으로 보내지만, 다운로드 시에는 0부터 시작해서 8KB씩 증가하는 값을 보냅니다. 이렇게 하면 나중에 이어받기 기능을 추가할 때도 이 필드를 활용할 수 있습니다.
-    int32_t data_size; // 실제로 담긴 데이터의 크기입니다. 업로드 시에는 8KB 이하로 보내지만, 마지막 조각은 8KB보다 작을 수 있기 때문에 이 필드가 필요합니다. 다운로드 시에도 8KB씩 보내지만, 마지막 조각은 8KB보다 작을 수 있기 때문에 이 필드가 필요합니다.
-    int64_t file_size; // 파일 전체 크기입니다. 다운로드 시작 응답에서 클라이언트에게 파일 크기를 알려주기 위해 사용됩니다. 업로드 시에는 0으로 보내지만, 다운로드 시에는 실제 파일 크기를 담아서 보냅니다.
+    int16_t type;       // PacketType
+    int32_t user_pk;    // 유저 PK
+    int32_t file_pk;    // 파일 PK (업로드 시 서버가 발급, 다운로드 시 클라이언트가 요청)
+    long offset;        // 파일의 어느 위치부터 데이터를 담고 있는지 나타내는 필드입니다. 업로드 시에는 0으로 보내지만, 다운로드 시에는 0부터 시작해서 8KB씩 증가하는 값을 보냅니다. 이렇게 하면 나중에 이어받기 기능을 추가할 때도 이 필드를 활용할 수 있습니다.
+    int32_t data_size;  // 실제로 담긴 데이터의 크기입니다. 업로드 시에는 8KB 이하로 보내지만, 마지막 조각은 8KB보다 작을 수 있기 때문에 이 필드가 필요합니다. 다운로드 시에도 8KB씩 보내지만, 마지막 조각은 8KB보다 작을 수 있기 때문에 이 필드가 필요합니다.
+    int64_t file_size;  // 파일 전체 크기입니다. 다운로드 시작 응답에서 클라이언트에게 파일 크기를 알려주기 위해 사용됩니다. 업로드 시에는 0으로 보내지만, 다운로드 시에는 실제 파일 크기를 담아서 보냅니다.
     char fileName[256]; // 파일 이름을 저장할 공간 (최대 256바이트)
-    char data[8192];   // 8KB 데이터 그릇
+    char data[8192];    // 8KB 데이터 그릇
 };
 #pragma pack(pop)
 
@@ -123,7 +125,7 @@ struct AuthResponse
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct AdminPacket     // 관리자가 서버로 명령을 보낼 때 사용할 구조체
+struct AdminPacket // 관리자가 서버로 명령을 보낼 때 사용할 구조체
 {
     int16_t type;      // 위에서 정의한 200, 201, 202 중 하나
     int32_t admin_pk;  // 요청하는 사람의 PK (보안 검증용, 무조건 1이어야 함)

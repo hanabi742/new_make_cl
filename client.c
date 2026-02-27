@@ -66,25 +66,31 @@ void get_default_download_path(const char *filename, char *out_path)
     else
         strcpy(out_path, filename);
 }
-void delete_folder(int sock, int user_pk) 
+void delete_folder(int sock, int user_pk)
 {
     struct FilePacket pkt;
     memset(&pkt, 0, sizeof(pkt));
-    pkt.type = 45; pkt.user_pk = user_pk;
+    pkt.type = 45;
+    pkt.user_pk = user_pk;
     send(sock, (char *)&pkt, sizeof(pkt), 0);
-    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.type == 46) {
-        if (pkt.file_pk == 1) printf("  [Success] 폴더 철거 완료.\n");
-        else printf("  [Error] 삭제 거부! 폴더 안에 파일이 남아있습니다.\n");
+    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.type == 46)
+    {
+        if (pkt.file_pk == 1)
+            printf("  [Success] 폴더 철거 완료.\n");
+        else
+            printf("  [Error] 삭제 거부! 폴더 안에 파일이 남아있습니다.\n");
     }
 }
 
-void check_storage_quota(int sock, int user_pk) 
+void check_storage_quota(int sock, int user_pk)
 {
     struct FilePacket pkt;
     memset(&pkt, 0, sizeof(pkt));
-    pkt.type = 310; pkt.user_pk = user_pk;
+    pkt.type = 310;
+    pkt.user_pk = user_pk;
     send(sock, (char *)&pkt, sizeof(pkt), 0);
-    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.type == 311) {
+    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.type == 311)
+    {
         long max_mb = pkt.file_size / (1024 * 1024);
         long remain_mb = pkt.offset / (1024 * 1024);
         printf("\n  [ 총 제공: %ld MB | 사용 중: %ld MB | 남은 용량: %ld MB ]\n", max_mb, max_mb - remain_mb, remain_mb);
@@ -258,13 +264,14 @@ int upload_file(int sock, int user_pk, const char *filename)
     while (offset < fsize)
     {
         memset(pkt, 0, sizeof(*pkt));
-        pkt->type    = PKT_REQ_UPLOAD_CHUNK;
+        pkt->type = PKT_REQ_UPLOAD_CHUNK;
         pkt->user_pk = user_pk;
         pkt->file_pk = file_pk;
-        pkt->offset  = offset;
+        pkt->offset = offset;
 
         int read_bytes = fread(pkt->data, 1, sizeof(pkt->data), fp);
-        if (read_bytes <= 0) break;
+        if (read_bytes <= 0)
+            break;
 
         pkt->data_size = read_bytes;
         send(sock, (char *)pkt, sizeof(*pkt), 0);
@@ -277,7 +284,7 @@ int upload_file(int sock, int user_pk, const char *filename)
 
     // 업로드 완료 신호 전송
     memset(pkt, 0, sizeof(*pkt));
-    pkt->type    = PKT_REQ_UPLOAD_END;
+    pkt->type = PKT_REQ_UPLOAD_END;
     pkt->user_pk = user_pk;
     pkt->file_pk = file_pk;
     send(sock, (char *)pkt, sizeof(*pkt), 0);
@@ -299,7 +306,8 @@ void request_file_list(int sock, int user_pk)
     pkt.type = 40; // PKT_REQ_LIST
     pkt.user_pk = user_pk;
 
-    if (send(sock, (char *)&pkt, sizeof(pkt), 0) < 0) return;
+    if (send(sock, (char *)&pkt, sizeof(pkt), 0) < 0)
+        return;
 
     printf("\n  [목록 조회 중...]\n");
     // 헤더 출력은 루프 밖에서 한 번만
@@ -309,15 +317,18 @@ void request_file_list(int sock, int user_pk)
     while (1)
     {
         // 서버로부터 패킷 하나를 통째로 읽음
-        if (recv_all(sock, (char *)&pkt, sizeof(pkt)) <= 0) break;
+        if (recv_all(sock, (char *)&pkt, sizeof(pkt)) <= 0)
+            break;
 
         // ★ 서버가 "목록 전송 끝" 신호(42)를 보내면 루프 탈출
-        if (pkt.type == 42) {
-            break; 
+        if (pkt.type == 42)
+        {
+            break;
         }
 
         // 목록 데이터(41)인 경우에만 출력
-        if (pkt.type == 41) {
+        if (pkt.type == 41)
+        {
             printf("  %s\n", pkt.data);
         }
     }
@@ -381,6 +392,49 @@ void download_file(int sock, int user_pk, int file_pk, const char *save_path, co
     fclose(fp);
     free(pkt);
 }
+void request_upgrade_grade(int sock, int user_pk, const char *target_grade)
+{
+    // 💡 1. struct 키워드 추가 및 C언어 표준 방식(memset)으로 초기화
+    struct FilePacket req;
+    memset(&req, 0, sizeof(req));
+
+    req.type = PKT_REQ_UPGRADE_GRADE;
+    req.user_pk = user_pk;
+
+    strncpy(req.fileName, target_grade, sizeof(req.fileName) - 1);
+
+    // 💡 2. sizeof 연산자 안에도 struct 명시
+    if (send(sock, (char *)&req, sizeof(struct FilePacket), 0) < 0)
+    {
+        printf("  [Error] 서버로 등급 변경 요청을 보내지 못했습니다.\n");
+        return;
+    }
+
+    // 💡 3. 응답 받을 때도 struct 명시 및 초기화
+    struct FilePacket res;
+    memset(&res, 0, sizeof(res));
+
+    if (recv(sock, (char *)&res, sizeof(struct FilePacket), 0) > 0)
+    {
+        if (res.type == PKT_RES_UPGRADE_GRADE)
+        {
+            // 서버에서 성공 시 file_pk에 1을 담아 보내도록 설계했습니다.
+            if (res.file_pk == 1)
+            {
+                printf("  [System] 성공적으로 '%s'(으)로 등급이 변경되었습니다!\n", target_grade);
+                printf("  [System] 메인 메뉴의 '남은 용량 확인'에서 늘어난 용량을 확인해보세요.\n");
+            }
+            else
+            {
+                printf("  [Error] 등급 변경 실패 (DB 업데이트 오류)\n");
+            }
+        }
+        else
+        {
+            printf("  [Error] 등급 변경 실패 (서버 응답 오류)\n");
+        }
+    }
+}
 
 // ═══════════════════════════════════════════════════════════
 //  서브메뉴: 📂 파일
@@ -426,31 +480,40 @@ void menu_file(int sock, int user_pk)
             upload_file(sock, user_pk, path);
             PAUSE();
         }
-        else if (ch == 2) 
+        else if (ch == 2)
         {
             printf("  [System] 최근 파일 목록 (최대 20개)\n");
             request_file_list(sock, user_pk); // 💡 다운로드 전 목록 출력
-            
-            int fpk; char fname[256], spath[512];
-            printf("\n  다운로드할 파일 PK (취소: 0): "); scanf("%d", &fpk); FLUSH_STDIN();
-            if (fpk == 0) continue;
-            
-            printf("  저장할 이름 (경로 제외): "); scanf("%255s", fname); FLUSH_STDIN();
+
+            int fpk;
+            char fname[256], spath[512];
+            printf("\n  다운로드할 파일 PK (취소: 0): ");
+            scanf("%d", &fpk);
+            FLUSH_STDIN();
+            if (fpk == 0)
+                continue;
+
+            printf("  저장할 이름 (경로 제외): ");
+            scanf("%255s", fname);
+            FLUSH_STDIN();
             get_default_download_path(fname, spath);
             download_file(sock, user_pk, fpk, spath, fname);
             PAUSE();
         }
-        else if (ch == 4) 
+        else if (ch == 4)
         {
             printf("  [System] 내 파일 목록\n");
             request_file_list(sock, user_pk); // 💡 삭제 전 목록 출력
-            
+
             int dpk;
-            printf("\n  삭제할 파일 PK (취소: 0): "); scanf("%d", &dpk); FLUSH_STDIN();
-            if (dpk != 0) delete_file(sock, user_pk, dpk);
+            printf("\n  삭제할 파일 PK (취소: 0): ");
+            scanf("%d", &dpk);
+            FLUSH_STDIN();
+            if (dpk != 0)
+                delete_file(sock, user_pk, dpk);
             PAUSE();
         }
-        else if (ch == 5) 
+        else if (ch == 5)
         {
             check_storage_quota(sock, user_pk);
             PAUSE();
@@ -474,11 +537,11 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
     {
         CLEAR();
         printf("  ╔══════════════════════════════════╗\n");
-        printf("  ║     ⚙️   설정 (Settings)          ║\n");
+        printf("  ║     ⚙️   설정 (Settings)         ║\n");
         printf("  ╠══════════════════════════════════╣\n");
         printf("  ║  1. 개인 설정 (미구현)           ║\n");
         printf("  ║  2. 메시지 설정 (미구현)         ║\n");
-        printf("  ║  3. 파일 설정 (미구현)           ║\n");
+        printf("  ║  3. 등급 설정 (용량 확장)        ║\n");
         printf("  ║  4. 내 폴더 삭제 (계정 탈퇴)     ║\n");
         printf("  ║  5. 로그아웃                     ║\n");
         printf("  ║  0. 돌아가기                     ║\n");
@@ -501,21 +564,75 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
         }
 
         CLEAR();
-        if (ch == 1 || ch == 2 || ch == 3)
+        // 💡 기존 3번(등급 설정)을 준비 중 목록에서 제외했습니다.
+        if (ch == 1 || ch == 2)
         {
             printf("  [System] 해당 기능은 준비 중입니다.\n");
             PAUSE();
         }
-        else if (ch == 4) 
+        else if (ch == 3) // 💡 3번 등급 설정 로직 추가
+        {
+            printf("  ╔══════════════════════════════════╗\n");
+            printf("  ║       등급 설정 (Storage)        ║\n");
+            printf("  ╠══════════════════════════════════╣\n");
+            printf("  ║  1. 일반     (100MB)             ║\n");
+            printf("  ║  2. 비지니스 (200MB)             ║\n");
+            printf("  ║  3. VIP      (500MB)             ║\n");
+            printf("  ║  4. VVIP     (1GB)               ║\n");
+            printf("  ║  0. 취소                         ║\n");
+            printf("  ╚══════════════════════════════════╝\n");
+            printf("  변경할 등급 선택: ");
+
+            int grade_ch;
+            if (scanf("%d", &grade_ch) == 1)
+            {
+                FLUSH_STDIN();
+                char target_grade[32] = "";
+
+                if (grade_ch == 1)
+                    strcpy(target_grade, "일반");
+                else if (grade_ch == 2)
+                    strcpy(target_grade, "비지니스");
+                else if (grade_ch == 3)
+                    strcpy(target_grade, "VIP");
+                else if (grade_ch == 4)
+                    strcpy(target_grade, "VVIP");
+                else if (grade_ch == 0)
+                {
+                    printf("  [System] 등급 변경을 취소합니다.\n");
+                }
+                else
+                {
+                    printf("  [Error] 올바른 번호를 선택해주세요.\n");
+                }
+
+                // 올바른 등급을 선택했을 경우 서버로 변경 요청
+                if (grade_ch >= 1 && grade_ch <= 4)
+                {
+                    // 💡 서버에 등급 변경 패킷을 보내는 함수 호출
+                    request_upgrade_grade(sock, user_pk, target_grade);
+                }
+            }
+            else
+            {
+                FLUSH_STDIN();
+                printf("  [Error] 숫자를 입력해주세요.\n");
+            }
+            PAUSE();
+        }
+        else if (ch == 4)
         {
             printf("  [경고] 빈 폴더만 철거 가능합니다. 지우시겠습니까? (1:예): ");
             int confirm;
-            if (scanf("%d", &confirm) == 1 && confirm == 1) 
+            if (scanf("%d", &confirm) == 1 && confirm == 1)
             {
                 FLUSH_STDIN();
                 delete_folder(sock, user_pk);
-            } 
-            else { FLUSH_STDIN(); }
+            }
+            else
+            {
+                FLUSH_STDIN();
+            }
             PAUSE();
         }
         else if (ch == 5)
