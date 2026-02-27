@@ -386,7 +386,19 @@ int main()
                         AdminPacket *admin_pkt = (AdminPacket *)packet;
                         if (admin.check_admin(admin_pkt->admin_pk))
                         {
-                            admin.sendGlobalNotice(admin_pkt->data);
+                            // admin.sendGlobalNotice(admin_pkt->data);
+                            std::string notice_msg = "[전체공지] " + std::string(admin_pkt->data);
+        
+                            // 데이터 패킷 준비
+                            FilePacket res = {};
+                            res.type = PKT_RES_ADMIN_NOTICE;
+                            strncpy(res.data, notice_msg.c_str(), sizeof(res.data) - 1);
+
+                            // 모든 클라이언트에게 전송 (브로드캐스트)
+                            lock_guard<mutex> lock(v_mtx);
+                            for (int sock : client_sockets) {
+                                send(sock, (char *)&res, sizeof(FilePacket), 0);
+                            }
                         }
                         break;
                     }

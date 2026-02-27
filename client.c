@@ -621,7 +621,7 @@ bool check_admin(int user_pk)
 void request_admin_action(int sock, int admin_pk, int target_pk, int type, const char* message) {
     AdminPacket pkt = {0};
     pkt.type = type;         // PKT_REQ_ADMIN_NOTICE, PKT_REQ_ADMIN_BAN 등
-    pkt.admin_pk = admin_pk; // 관리자 여부 확인용 (서버에선 PK 1번을 관리자로 간주)
+    pkt.admin_pk = admin_pk; // 관리자 여부 확인용
     pkt.target_pk = target_pk;
     
     if (message != NULL) {
