@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <openssl/sha.h>
+#include <termios.h>
 #include "Protocol.hpp"
 #include "msg_client.h"
 #include "UserManager.hpp"
@@ -110,6 +111,46 @@ void hash_password(const char *plain, char *out)
     for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
         sprintf(out + i * 2, "%02x", hash[i]);
     out[64] = '\0';
+}
+
+void input_password(const char *prompt, char *buf, int max_len)
+{
+    struct termios oldt, newt;
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~(ECHO | ICANON);
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+
+    printf("%s", prompt);
+    fflush(stdout);
+
+    int i = 0, c;
+    while ((c = getchar()) != '\n' && c != EOF && i < max_len - 1)
+    {
+        if (c == 127 || c == '\b')
+        {
+            if (i > 0) { i--; printf("\b \b"); fflush(stdout); }
+        }
+        else { buf[i++] = (char)c; printf("*"); fflush(stdout); }
+    }
+    buf[i] = '\0';
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    printf("\n");
+}
+
+int validate_password(const char *pw)
+{
+    int len = (int)strlen(pw);
+    if (len < 5 || len > 15) { printf("  [Error] 비밀번호는 5~15자여야 합니다.\n"); return 0; }
+    int has_alpha = 0, has_digit = 0;
+    for (int i = 0; i < len; i++)
+    {
+        if ((pw[i]>='a'&&pw[i]<='z')||(pw[i]>='A'&&pw[i]<='Z')) has_alpha = 1;
+        else if (pw[i]>='0'&&pw[i]<='9') has_digit = 1;
+        else { printf("  [Error] 영문자와 숫자만 사용할 수 있습니다.\n"); return 0; }
+    }
+    if (!has_alpha || !has_digit) { printf("  [Error] 영문자와 숫자를 반드시 혼합해야 합니다.\n"); return 0; }
+    return 1;
 }
 void delete_file(int sock, int user_pk, int file_pk)
 {
@@ -615,14 +656,12 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
                     char current_hash[65], new_hash[65];
                     char combined_data[131]; // 두 해시를 하나로 묶어 보낼 버퍼
 
-                    printf("  현재 비밀번호 입력: ");
-                    scanf("%31s", current_pw);
-                    FLUSH_STDIN();
+                    input_password("  현재 비밀번호 입력: ", current_pw, 32);
                     hash_password(current_pw, current_hash);
 
-                    printf("  새로운 비밀번호 입력: ");
-                    scanf("%31s", new_pw);
-                    FLUSH_STDIN();
+                    do {
+                        input_password("  새로운 비밀번호 입력 (영문+숫자 혼합 5~15자): ", new_pw, 32);
+                    } while (!validate_password(new_pw));
                     hash_password(new_pw, new_hash);
 
                     // 💡 [팁] 패킷의 new_data 필드(65자)에 두 데이터를 다 담기 어려우므로,
@@ -976,9 +1015,9 @@ int main(int argc, char *argv[])
                 printf("  이름: ");
                 scanf("%9s", username);
                 FLUSH_STDIN();
-                printf("  비밀번호: ");
-                scanf("%31s", pw);
-                FLUSH_STDIN();
+                do {
+                    input_password("  비밀번호 (영문+숫자 혼합 5~15자): ", pw, 32);
+                } while (!validate_password(pw));
                 int pk = request_auth(sock, PKT_REQ_REGISTER, email, pw, username);
                 if (pk > 0)
                 {
@@ -998,9 +1037,7 @@ int main(int argc, char *argv[])
             printf("  이메일: ");
             scanf("%63s", email);
             FLUSH_STDIN();
-            printf("  비밀번호: ");
-            scanf("%31s", pw);
-            FLUSH_STDIN();
+            input_password("  비밀번호: ", pw, 32);
             user_pk = request_auth(sock, PKT_REQ_LOGIN, email, pw, "");
             if (user_pk > 0)
             {
