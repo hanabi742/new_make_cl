@@ -9,19 +9,19 @@
 // ─────────────────────────────────────────────────────────────
 
 // ▶ 공용 DB (팀 서버)
-// #define DB_HOST "10.10.20.101"
+#define DB_HOST "10.10.20.101"
 
 // ▶ 로컬 개발 DB
-#define DB_HOST "127.0.0.1"
+// #define DB_HOST "127.0.0.1"
 
 // ─────────────────────────────────────────────────────────────
 // [2] DB 계정 — 본인 계정만 주석 해제
 //     공용 DB(10.10.20.101) 사용 시 : 본인 계정 선택
 //     로컬 DB(127.0.0.1)   사용 시 : 본인 계정 선택
 // ─────────────────────────────────────────────────────────────
-#define DB_USER "JIHOON"
+// #define DB_USER "JIHOON"
 // #define DB_USER "HEECHANG"
-// #define DB_USER "TAEHYEON"
+#define DB_USER "TAEHYEON"
 
 // ─────────────────────────────────────────────────────────────
 // [3] DB 공통 설정 (변경 불필요)
@@ -32,12 +32,12 @@
 // ─────────────────────────────────────────────────────────────
 // [4] 서버 네트워크 설정
 // ─────────────────────────────────────────────────────────────
-#define SERVER_IP        "127.0.0.1"  // 클라이언트가 접속할 서버 IP
-#define SERVER_PORT_MAIN  9000        // 파일 서버 포트
-#define SERVER_PORT_MSG   9001        // 메시지 서버 포트
+#define SERVER_IP "127.0.0.1" // 클라이언트가 접속할 서버 IP
+#define SERVER_PORT_MAIN 9000 // 파일 서버 포트
+#define SERVER_PORT_MSG 9001  // 메시지 서버 포트
 
 // ─────────────────────────────────────────────────────────────
 // [5] 이메일 발송 계정 (AuthManager — sendMailViaCurl)
 // ─────────────────────────────────────────────────────────────
-#define MAIL_FROM_ADDR  "taehyunny0312@gmail.com"
-#define MAIL_APP_PASS   "rnwz koev idvf mmna"
+#define MAIL_FROM_ADDR "taehyunny0312@gmail.com"
+#define MAIL_APP_PASS "rnwz koev idvf mmna"
