@@ -550,10 +550,77 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
         printf("  선택: ");
 
         int ch;
-        if (scanf("%d", &ch) != 1)
+        if (ch == 1)
         {
-            FLUSH_STDIN();
-            continue;
+            printf("  ╔══════════════════════════════════╗\n");
+            printf("  ║       개인 설정 (Personal)       ║\n");
+            printf("  ╠══════════════════════════════════╣\n");
+            printf("  ║  1. 이름 변경                    ║\n");
+            printf("  ║  2. 비밀번호 변경                ║\n");
+            printf("  ║  3. 이메일(ID) 변경              ║\n");
+            printf("  ║  0. 취소                         ║\n");
+            printf("  ╚══════════════════════════════════╝\n");
+            printf("  선택: ");
+
+            int sub_ch;
+            if (scanf("%d", &sub_ch) == 1)
+            {
+                FLUSH_STDIN();
+                char input_data[65] = {0};
+
+                if (sub_ch == 1)
+                {
+                    printf("  새로운 이름 입력: ");
+                    scanf("%64s", input_data);
+                    FLUSH_STDIN();
+                    request_user_settings(sock, user_pk, 1, input_data);
+                }
+                else if (sub_ch == 2)
+                {
+                    char plain_pw[32];
+                    printf("  새로운 비밀번호 입력: ");
+                    scanf("%31s", plain_pw);
+                    FLUSH_STDIN();
+                    // 💡 [핵심] 비밀번호는 반드시 클라이언트에서 해시화 후 전송!
+                    hash_password(plain_pw, input_data);
+                    request_user_settings(sock, user_pk, 2, input_data);
+                }
+                else if (sub_ch == 3)
+                {
+                    char new_email[64] = {0};
+                    printf("  [System] 새로운 이메일로 인증을 진행합니다.\n");
+
+                    // 💡 [핵심] 기존에 만들어둔 회원가입용 이메일 인증 함수를 재사용!
+                    if (handle_email_auth(sock, new_email))
+                    {
+                        // 인증(및 중복검사)에 통과했을 때만 서버에 변경 요청을 보냄
+                        request_user_settings(sock, user_pk, 3, new_email);
+
+                        // 💡 [UX/보안 고려] 로그인 ID가 바뀌었으므로 로그아웃 시키는 것이 안전합니다.
+                        printf("  [System] 이메일(ID)이 변경되었습니다. 새 이메일로 다시 로그인해주세요.\n");
+                        *should_logout = 1;
+                        return; // 메뉴 루프 탈출
+                    }
+                    else
+                    {
+                        printf("  [System] 인증에 실패하여 이메일 변경이 취소되었습니다.\n");
+                    }
+                }
+                else if (sub_ch == 0)
+                {
+                    printf("  [System] 취소했습니다.\n");
+                }
+            }
+            else
+            {
+                FLUSH_STDIN();
+            }
+            PAUSE();
+        }
+        else if (ch == 2)
+        {
+            printf("  [System] 메시지 설정은 준비 중입니다.\n");
+            PAUSE();
         }
         FLUSH_STDIN();
 

@@ -86,14 +86,16 @@ public:
     // 2. 비밀번호 변경
     // 목적: 클라이언트에서 SHA-256으로 해싱되어 넘어온 새 비밀번호를 저장합니다.
     // ─────────────────────────────────────────────────────────────
-    bool updateUserPassword(int user_pk, const std::string& new_pwd_hash)
+    bool updateUserPassword(int user_pk, const std::string &new_pwd_hash)
     {
-        if (!conn) return false;
+        if (!conn)
+            return false;
 
         char query[256];
-        snprintf(query, sizeof(query), "UPDATE MEMBERSHIP SET PASSWORD = '%s' WHERE USER_NUM = %d", new_pwd_hash.c_str(), user_pk);
+        snprintf(query, sizeof(query), "UPDATE MEMBERSHIP SET PW = '%s' WHERE USER_NUM = %d", new_pwd_hash.c_str(), user_pk);
 
-        if (mysql_query(conn, query)) {
+        if (mysql_query(conn, query))
+        {
             std::cerr << "[User DB Error] 비밀번호 변경 실패: " << mysql_error(conn) << std::endl;
             return false;
         }
@@ -104,9 +106,10 @@ public:
     // ─────────────────────────────────────────────────────────────
     // 3. 이름(닉네임) 변경
     // ─────────────────────────────────────────────────────────────
-    bool updateUserName(int user_pk, const std::string& new_name)
+    bool updateUserName(int user_pk, const std::string &new_name)
     {
-        if (!conn) return false;
+        if (!conn)
+            return false;
 
         char query[256];
         char safe_name[256];
@@ -114,7 +117,8 @@ public:
 
         snprintf(query, sizeof(query), "UPDATE MEMBERSHIP SET NAME = '%s' WHERE USER_NUM = %d", safe_name, user_pk);
 
-        if (mysql_query(conn, query)) {
+        if (mysql_query(conn, query))
+        {
             std::cerr << "[User DB Error] 이름 변경 실패: " << mysql_error(conn) << std::endl;
             return false;
         }
