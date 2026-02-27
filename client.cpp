@@ -569,7 +569,7 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
     {
         CLEAR();
         printf("  ╔══════════════════════════════════╗\n");
-        printf("  ║     ⚙️   설정 (Settings)         ║\n");
+        printf("  ║     ⚙️   설정 (Settings)          ║\n");
         printf("  ╠══════════════════════════════════╣\n");
         printf("  ║  1. 개인 설정                    ║\n");
         printf("  ║  2. 메시지 설정 (미구현)         ║\n");
@@ -582,8 +582,10 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
         printf("  선택: ");
 
         int ch;
+        scanf("%d",&ch);
         if (ch == 1)
         {
+            CLEAR();
             printf("  ╔══════════════════════════════════╗\n");
             printf("  ║       개인 설정 (Personal)       ║\n");
             printf("  ╠══════════════════════════════════╣\n");
@@ -629,8 +631,8 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
 
                     // 현재는 편의상 64자 해시 두 개를 붙여서 서버로 보낸다고 가정 (서버에서 쪼개기)
                     sprintf(combined_data, "%s|%s", current_hash, new_hash);
-                    // request_user_settings(sock, user_pk, 2, combined_data);
-                    request_user_settings(sock, user_pk, 2, input_data);
+                    request_user_settings(sock, user_pk, 2, combined_data);
+                    // request_user_settings(sock, user_pk, 2, input_data);
                 }
                 else if (sub_ch == 3)
                 {
@@ -660,6 +662,7 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
             }
             else
             {
+                printf("  [Error] 0~3 중 선택하세요.\n");
                 FLUSH_STDIN();
             }
             PAUSE();
@@ -668,24 +671,18 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
         {
             printf("  [System] 메시지 설정은 준비 중입니다.\n");
             PAUSE();
+            FLUSH_STDIN();
         }
-        FLUSH_STDIN();
-
-        if (ch == 0)
-        {
-            CLEAR();
-            return;
-        }
-
-        CLEAR();
-        // 💡 기존 3번(등급 설정)을 준비 중 목록에서 제외했습니다.
-        if (ch == 1 || ch == 2)
-        {
-            printf("  [System] 해당 기능은 준비 중입니다.\n");
-            PAUSE();
-        }
+        // CLEAR();
+        // // 💡 기존 3번(등급 설정)을 준비 중 목록에서 제외했습니다.
+        // if (ch == 1 || ch == 2)
+        // {
+        //     printf("  [System] 해당 기능은 준비 중입니다.\n");
+        //     PAUSE();
+        // }
         else if (ch == 3) // 💡 3번 등급 설정 로직 추가
         {
+            CLEAR();
             printf("  ╔══════════════════════════════════╗\n");
             printf("  ║       등급 설정 (Storage)        ║\n");
             printf("  ╠══════════════════════════════════╣\n");
@@ -753,6 +750,11 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
         {
             printf("  [System] 로그아웃 합니다.\n");
             *should_logout = 1;
+            return;
+        }
+        else if (ch == 0)
+        {
+            CLEAR();
             return;
         }
         else
