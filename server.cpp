@@ -122,9 +122,9 @@ int main()
                 {
                     target_size = sizeof(AuthPacket);
                 }
-                else if (packet_type == PKT_REQ_ADMIN_NOTICE || packet_type == PKT_REQ_ADMIN_BAN || packet_type == PKT_REQ_ADMIN_RESET)
+               else if (packet_type == PKT_REQ_ADMIN_NOTICE || packet_type == PKT_REQ_ADMIN_BAN || packet_type == PKT_REQ_ADMIN_RESET || packet_type == PKT_REQ_ADMIN_STATUS)
                 {
-                    target_size = sizeof(AdminPacket);  // 관리자 명령어 처리를 위한 정확한 패킷 사이즈 할당
+                    target_size = sizeof(AdminPacket); 
                 }
                 else if (packet_type == PKT_REQ_USER_SETTINGS)
                 {
@@ -445,16 +445,16 @@ int main()
                         break;
                     }
 
-                    case PKT_REQ_LOGIN:
+                    case PKT_REQ_LOGIN: 
                     {
                         AuthPacket *auth_pkt = (AuthPacket *)packet;
                         int login_pk = auth.loginUser(auth_pkt->id, auth_pkt->pwd_hash);
 
-                        // 로그인 성공 시, 혹시 차단된 계정인지 2차 확인 (AdminManager)
+                        // 💡 [설계 2 반영] 로그인 성공 시, 해당 계정(PK)이 블랙리스트인지 2차 검증
                         if (login_pk > 0 && admin.isAccessDenied(client_ip, login_pk))
                         {
-                            cout << "[Security] 차단된 계정 접속 시도: " << login_pk << endl;
-                            login_pk = -1; // 로그인 실패 처리
+                            cout << "[Security] 차단된 계정(PK:" << login_pk << ") 접속 시도 차단됨." << endl;
+                            login_pk = -1; // 로그인 실패(거부) 처리
                         }
 
                         AuthResponse res = {};
@@ -464,44 +464,91 @@ int main()
                         break;
                     }
 
+                    // ── [관리자: 전체 공지사항 발송] ──────────────────────────────────────────
                     case PKT_REQ_ADMIN_NOTICE:
                     {
                         AdminPacket *admin_pkt = (AdminPacket *)packet;
-                        if (admin.check_admin(admin_pkt->admin_pk))
+                        
+                        // 💡 [설계 3 반영] 1번 PK만 관리자로 인정
+                        if (admin.isMasterAdmin(admin_pkt->admin_pk))
                         {
-                            // admin.sendGlobalNotice(admin_pkt->data);
                             std::string notice_msg = "[전체공지] " + std::string(admin_pkt->data);
-        
-                            // 데이터 패킷 준비
+                            admin.sendGlobalNotice(notice_msg); // 로그 출력
+                            
                             FilePacket res = {};
                             res.type = PKT_RES_ADMIN_NOTICE;
                             strncpy(res.data, notice_msg.c_str(), sizeof(res.data) - 1);
 
-                            // 모든 클라이언트에게 전송 (브로드캐스트)
+                            // 현재 접속 중인 모든 클라이언트에게 브로드캐스트
                             lock_guard<mutex> lock(v_mtx);
                             for (int sock : client_sockets) {
                                 send(sock, (char *)&res, sizeof(FilePacket), 0);
                             }
                         }
-                        break;
-                    }
-
-                    case PKT_REQ_ADMIN_BAN:
-                    {
-                        AdminPacket *admin_pkt = (AdminPacket *)packet; //
-                        if (admin.check_admin(admin_pkt->admin_pk))
+                        else 
                         {
-                            admin.banUser(admin_pkt->target_pk);
+                            cout << "[Security] 권한 없는 유저(PK:" << admin_pkt->admin_pk << ")의 공지 발송 시도." << endl;
                         }
                         break;
                     }
 
+                    // ── [관리자: 특정 유저 및 IP 블랙리스트 차단] ────────────────────────────
+                    case PKT_REQ_ADMIN_BAN:
+                    {
+                        AdminPacket *admin_pkt = (AdminPacket *)packet;
+                        
+                        // 💡 [설계 2 & 3 반영] 1번 PK인지 확인 후, IP+PK 동시 차단 실행
+                        if (admin.isMasterAdmin(admin_pkt->admin_pk))
+                        {
+                            // 클라이언트에서 전달받은 대상 PK와 IP(data 배열에 담겨있다고 가정) 사용
+                            // (주의: 클라이언트 패킷 구조에 맞게 IP 추출 필요, 임시로 "BlockedByAdmin" 사유 입력)
+                            std::string target_ip = string(admin_pkt->data); 
+                            
+                            if(admin.addCombinedBlacklist(target_ip, admin_pkt->target_pk, "운영자 수동 차단")) {
+                                cout << "[Admin] PK:" << admin_pkt->target_pk << " 영구 차단 완료." << endl;
+                            }
+                        }
+                        break;
+                    }
+
+                    // ── [관리자: 시스템 전체 초기화] ──────────────────────────────────────────
                     case PKT_REQ_ADMIN_RESET:
                     {
                         AdminPacket *admin_pkt = (AdminPacket *)packet;
-                        if (admin.check_admin(admin_pkt->admin_pk))
+                        
+                        // 💡 [설계 3 반영] 1번 PK 확인 및 전달받은 비밀번호 검증
+                        if (admin.isMasterAdmin(admin_pkt->admin_pk))
                         {
-                            admin.resetSystem();
+                            std::string admin_pw = string(admin_pkt->data); // 클라이언트가 data에 PW를 보냄
+                            
+                            if (admin.resetSystemWithAuth(admin_pkt->admin_pk, admin_pw)) {
+                                cout << "[Admin] 시스템 전체 초기화 성공." << endl;
+                                // 필요하다면 모든 클라이언트 강제 연결 해제 로직 추가 가능
+                            } else {
+                                cout << "[Admin] 초기화 실패: 비밀번호 오류 또는 권한 없음." << endl;
+                            }
+                        }
+                        break;
+                    }
+
+                    // ── [관리자: 클라우드 전체 용량 및 접속자 조회] ─────────────────────────
+                    case PKT_REQ_ADMIN_STATUS: // (이 패킷 타입은 Protocol.hpp에 새로 추가 필요)
+                    {
+                        AdminPacket *admin_pkt = (AdminPacket *)packet;
+                        if (admin.isMasterAdmin(admin_pkt->admin_pk))
+                        {
+                            long long used_bytes, remain_bytes;
+                            admin.getCloudUsageStatus(used_bytes, remain_bytes); // 설계 1
+                            int current_users = admin.getCurrentClientCount();   // 설계 4
+                            
+                            AdminPacket res = {};
+                            res.type = PKT_RES_ADMIN_STATUS;
+                            res.target_pk = current_users; // 남는 변수를 활용해 접속자 수 전달
+                            
+                            // data 버퍼를 활용해 문자열 형태로 용량 전달 (또는 구조체 확장)
+                            snprintf(res.data, sizeof(res.data), "%lld|%lld", used_bytes, remain_bytes);
+                            
+                            send(client_sock, (char *)&res, sizeof(AdminPacket), 0);
                         }
                         break;
                     }

@@ -80,7 +80,9 @@ typedef enum
     PKT_RES_STORAGE_INFO = 311, // 용량 정보 응답
 
     PKT_REQ_UPGRADE_GRADE = 320,
-    PKT_RES_UPGRADE_GRADE = 321
+    PKT_RES_UPGRADE_GRADE = 321,
+    PKT_REQ_ADMIN_STATUS = 322, // 관리자 시스템 상태 요청
+    PKT_RES_ADMIN_STATUS = 323, // 관리자 시스템 상태 응답
 } PacketType;
 
 /* 6. 패킷 구조체 (1바이트 정렬) */

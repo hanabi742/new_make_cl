@@ -881,16 +881,18 @@ void menu_hub(int sock, int user_pk, const char *email)
 // 관리자 확인 함수
 bool check_admin(int user_pk)
 {
-    if(user_pk == ADMIN_PK)
+    // 오직 PK 1번(최초 가입자)만 최고 관리자로 인정합니다.
+    if(user_pk == 1) 
         return true;
+    
     return false;
 }
 
-// 관리자 요청 전송 함수
+// 관리자 요청 전송 및 응답 처리 함수 (서버 상태 수신 기능 추가됨)
 void request_admin_action(int sock, int admin_pk, int target_pk, int type, const char* message) {
     AdminPacket pkt = {0};
-    pkt.type = type;         // PKT_REQ_ADMIN_NOTICE, PKT_REQ_ADMIN_BAN 등
-    pkt.admin_pk = admin_pk; // 관리자 여부 확인용
+    pkt.type = type;
+    pkt.admin_pk = admin_pk; // 관리자 권한 검증용 (PK 1)
     pkt.target_pk = target_pk;
     
     if (message != NULL) {
@@ -898,50 +900,106 @@ void request_admin_action(int sock, int admin_pk, int target_pk, int type, const
     }
 
     if (send(sock, (char*)&pkt, sizeof(AdminPacket), 0) <= 0) {
-        printf("  [Error] 관리자 요청 전송 실패\n");
+        printf("  [Error] 서버로 요청을 보내지 못했습니다.\n");
         return;
     }
-    printf("  [System] 관리자 명령이 서버로 전달되었습니다.\n");
+
+    // 💡 [추가됨] 서버 상태 조회(STATUS) 요청인 경우, 응답을 받아와서 화면에 출력합니다.
+    if (type == PKT_REQ_ADMIN_STATUS) {
+        AdminPacket res = {0};
+        if (recv_all(sock, (char*)&res, sizeof(AdminPacket)) > 0 && res.type == PKT_RES_ADMIN_STATUS) {
+            long long used_bytes = 0, remain_bytes = 0;
+            // 서버에서 보낸 "%lld|%lld" 파싱
+            sscanf(res.data, "%lld|%lld", &used_bytes, &remain_bytes);
+            
+            int current_users = res.target_pk; 
+
+            printf("\n  [ ☁️ CLOUD SERVER STATUS ]\n");
+            printf("  ▶ 현재 접속자 : %d 명\n", current_users);
+            printf("  ▶ 총 제공 용량: 1000 GB\n");
+            printf("  ▶ 사용 중     : %lld MB\n", used_bytes / (1024 * 1024));
+            printf("  ▶ 남은 용량   : %lld MB\n", remain_bytes / (1024 * 1024));
+            printf("  --------------------------------------\n");
+        }
+    } else {
+        printf("  [System] 관리자 명령이 서버로 전달되었습니다.\n");
+    }
 }
 
-// 관리자 전용 메뉴
-void admin_menu(int sock, int admin_pk) {
+// 관리자 전용 메뉴 (UI 대폭 개편 및 기능 연동)
+void admin_menu(int sock, int admin_pk) 
+{
+    // 혹시 모를 이중 보안 방어 (PK 1번만 접근 가능)
+    if (admin_pk != 1) {
+        printf("  [경고] 접근 권한이 없습니다. (최고 관리자 전용)\n");
+        return;
+    }
+
     int choice;
-    while (1) {
+    while (1) 
+    {
         CLEAR();
-        printf("  ===== 관리자 모드 (PK: %d) =====\n", admin_pk);
-        printf("  1. 전체 공지사항 발송\n");
-        printf("  2. 특정 유저 차단 (BAN)\n");
-        printf("  3. 시스템 전체 초기화 (주의!)\n");
-        printf("  0. 일반 메뉴로\n");
+        printf("  ===== 👑 MASTER ADMIN CONSOLE (PK: %d) =====\n", admin_pk);
+        
+        // 💡 [추가됨] 메뉴를 그릴 때마다 서버에 최신 상태를 요청해서 뿌려줌
+        request_admin_action(sock, admin_pk, 0, PKT_REQ_ADMIN_STATUS, NULL);
+
+        printf("\n  1. 전체 공지사항 발송\n");
+        printf("  2. 강력 블랙리스트 등록 (IP + PK 동시 차단)\n");
+        printf("  3. 시스템 전체 초기화 (데이터 소멸)\n");
+        printf("  0. 일반 메뉴로 돌아가기\n");
         printf("  선택: ");
-        scanf("%d", &choice);
+        
+        if (scanf("%d", &choice) != 1) 
+        {
+            FLUSH_STDIN();
+            continue;
+        }
         FLUSH_STDIN();
 
         if (choice == 0) break;
 
-        if (choice == 1) {
+        if (choice == 1) 
+        {
             char notice[256];
-            printf("  공지 내용: ");
+            printf("  [공지] 발송할 메시지: ");
             fgets(notice, sizeof(notice), stdin);
             notice[strcspn(notice, "\n")] = 0; // 개행 제거
+            
             request_admin_action(sock, admin_pk, 0, PKT_REQ_ADMIN_NOTICE, notice);
         }
-        else if (choice == 2) {
+        else if (choice == 2) 
+        {
             int target;
-            printf("  차단할 유저 PK: ");
+            char target_ip[64];
+            printf("  [차단] 차단할 유저의 PK: ");
             scanf("%d", &target);
             FLUSH_STDIN();
-            request_admin_action(sock, admin_pk, target, PKT_REQ_ADMIN_BAN, NULL);
-        }
-        else if (choice == 3) {
-            char confirm[10];
-            printf("  정말로 초기화하시겠습니까? (yes/no): ");
-            scanf("%9s", confirm);
+            
+            printf("  [차단] 차단할 유저의 IP (모르면 0.0.0.0 입력): ");
+            scanf("%63s", target_ip);
             FLUSH_STDIN();
-            if (strcmp(confirm, "yes") == 0) {
-                request_admin_action(sock, admin_pk, 0, PKT_REQ_ADMIN_RESET, NULL);
-            }
+
+            // IP 정보를 message 매개변수에 실어서 보냅니다.
+            request_admin_action(sock, admin_pk, target, PKT_REQ_ADMIN_BAN, target_ip);
+        }
+        else if (choice == 3) 
+        {
+            char pw[65];
+            printf("\n  [🚨 위험] 정말로 클라우드 데이터를 초기화하시겠습니까?\n");
+            
+            // 💡 [핵심] 태현님이 추가하신 비밀번호 숨김 함수를 여기에 바로 활용!
+            input_password("  본인 확인을 위해 관리자(PK:1) 비밀번호를 입력하세요: ", pw, 32);
+
+            // 해싱 처리
+            char hashed_pw[65];
+            hash_password(pw, hashed_pw);
+
+            // 해싱된 암호를 서버로 전송
+            request_admin_action(sock, admin_pk, 0, PKT_REQ_ADMIN_RESET, hashed_pw);
+        }
+        else {
+            printf("  [Error] 잘못된 선택입니다.\n");
         }
         PAUSE();
     }
