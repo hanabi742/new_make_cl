@@ -166,7 +166,7 @@ namespace DBHelper {
 
     inline std::string getIDByUserNum(MYSQL* db, const std::string& user_num) {
         std::cout << "[DBHelper] getIDByUserNum() user_num=" << user_num << std::endl;
-        std::string sql = "SELECT DEFAULT_ID FROM MEMBERSHIP WHERE USER_NUM=" + user_num + " LIMIT 1";
+        std::string sql = "SELECT ID FROM MEMBERSHIP WHERE USER_NUM=" + user_num + " LIMIT 1";
         if (mysql_query(db, sql.c_str())) {
             std::cerr << "[DBHelper Error] getIDByUserNum 쿼리 실패: " << mysql_error(db) << std::endl;
             return "";
@@ -329,7 +329,7 @@ namespace MsgHandler {
 
         // 목록 (JOIN을 통해 보낸 사람의 ID를 가져옴)
         std::string sql = 
-            "SELECT m.MESSAGE_NUM, s.DEFAULT_ID, m.CREATED_AT, m.READ_STATUS, m.DETAIL "
+            "SELECT m.MESSAGE_NUM, s.ID, m.CREATED_AT, m.READ_STATUS, m.DETAIL "
             "FROM MESSAGE m "
             "JOIN MEMBERSHIP s ON m.SEND_USER = s.USER_NUM "
             "WHERE m.TAKE_USER='" + safe_id + "' "

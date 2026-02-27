@@ -72,7 +72,7 @@ public:
         char query[256];
         snprintf(query, sizeof(query),
                  "UPDATE MEMBERSHIP SET DEFAULT_EMAIL = '%s' WHERE USER_NUM = %d", new_email.c_str(), user_pk);
-            
+        
         if (mysql_query(conn, query))
         {
             std::cerr << "[User DB Error] 이메일 변경 실패: " << mysql_error(conn) << std::endl;

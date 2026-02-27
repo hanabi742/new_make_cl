@@ -155,6 +155,6 @@ struct UserSettingsPacket
     int16_t type;         // PKT_REQ_USER_SETTINGS
     int32_t user_pk;      // 변경을 요청하는 유저의 PK
     int32_t setting_type; // 1: 이름 변경, 2: 비밀번호 변경
-    char new_data[65];    // 새 이름, 또는 해시화된 새 비밀번호
+    char new_data[131];    // 새 이름, 또는 해시화된 새 비밀번호
 };
 #pragma pack(pop)
