@@ -446,22 +446,26 @@ int main()
                         UserSettingsPacket *req = (UserSettingsPacket *)packet;
                         bool success = false;
 
-                if (req->setting_type == 1)
-                {
-                    success = user_mgr.updateUserName(req->user_pk, req->new_data);
-                }
-                else if (req->setting_type == 2) //현재 비밀번호 확인후 비밀번호 변경 로직
-                {
-                    // combined_data에서 "기존해시|새해시" 분리
-                    string data = req->new_data;
-                    size_t pos = data.find('|');
-                    if (pos != string::npos)
-                    {
-                        string old_h = data.substr(0, pos);
-                        string new_h = data.substr(pos + 1);
-                        success = user_mgr.verifyAndUpdatePassword(req->user_pk, old_h, new_h);
-                    }
-                }
+                        if (req->setting_type == 1)
+                        {
+                            success = user_mgr.updateUserName(req->user_pk, req->new_data);
+                        }
+                        else if (req->setting_type == 2) //현재 비밀번호 확인후 비밀번호 변경 로직
+                        {
+                            // combined_data에서 "기존해시|새해시" 분리
+                            string data = req->new_data;
+                            size_t pos = data.find('|');
+                            if (pos != string::npos)
+                            {
+                                string old_h = data.substr(0, pos);
+                                string new_h = data.substr(pos + 1);
+                                success = user_mgr.verifyAndUpdatePassword(req->user_pk, old_h, new_h);
+                            }
+                        }
+                        else if (req->setting_type == 3)
+                        {
+                            success = user_mgr.changeUserEmail(req->user_pk, req->new_data);
+                        }
 
                         FilePacket res = {};
                         res.type = PKT_RES_USER_SETTINGS;

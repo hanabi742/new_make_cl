@@ -529,6 +529,35 @@ void menu_file(int sock, int user_pk)
     }
 }
 
+void request_user_settings(int sock, int user_pk, int type, const char* new_data)
+{
+    struct UserSettingsPacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+
+    pkt.type = PKT_REQ_USER_SETTINGS;
+    pkt.user_pk = user_pk;
+    pkt.setting_type = type; // 1: 이름, 2: 비밀번호, 3: 이메일
+    strncpy(pkt.new_data, new_data, sizeof(pkt.new_data) - 1);
+
+    if (send(sock, (char*)&pkt, sizeof(pkt), 0) <= 0)
+    {
+        printf("  [Error] 서버 전송 실패\n");
+        return;
+    }
+
+    // 결과 수신 (FilePacket 구조체로 결과 판단)
+    struct FilePacket res;
+    memset(&res, 0, sizeof(res));
+    if (recv_all(sock, (char*)&res, sizeof(res)) > 0)
+    {
+        if (res.file_pk == 1){
+            printf("  [Success] 변경 사항이 서버에 반영되었습니다.\n");
+        } else {
+            printf("  [Error] 변경 실패 (현재 정보가 틀렸거나 중복된 데이터입니다.)\n");
+        }
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
 //  서브메뉴: ⚙️ 설정
 // ═══════════════════════════════════════════════════════════
@@ -569,7 +598,7 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
             if (scanf("%d", &sub_ch) == 1)
             {
                 FLUSH_STDIN();
-                char input_data[65] = {0};
+                char input_data[131] = {0};
 
                 if (sub_ch == 1)
                 {
@@ -600,7 +629,8 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
 
                     // 현재는 편의상 64자 해시 두 개를 붙여서 서버로 보낸다고 가정 (서버에서 쪼개기)
                     sprintf(combined_data, "%s|%s", current_hash, new_hash);
-                    request_user_settings(sock, user_pk, 2, combined_data);
+                    // request_user_settings(sock, user_pk, 2, combined_data);
+                    request_user_settings(sock, user_pk, 2, input_data);
                 }
                 else if (sub_ch == 3)
                 {
