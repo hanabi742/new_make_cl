@@ -1102,7 +1102,7 @@ void admin_menu(int sock, int admin_pk) {
 // ═══════════════════════════════════════════════════════════
 int main()
 {
-    const char *target_ip = "127.0.0.1";
+    const char *target_ip = SERVER_IP;
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
