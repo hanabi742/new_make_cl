@@ -52,7 +52,8 @@ public:
         // [방어 로직] 1. 새 이메일이 이미 존재하는지 중복 체크
         char check_query[256];
         snprintf(check_query, sizeof(check_query),
-                 "SELECT USER_NUM FROM USERS WHERE EMAIL = '%s'", new_email.c_str());
+                //  "SELECT USER_NUM FROM USERS WHERE EMAIL = '%s'", new_email.c_str());
+                "SELECT USER_NUM FROM MEMBERSHIP WHERE EMAIL = '%s'", new_email.c_str());
 
         if (mysql_query(conn, check_query) == 0)
         {
@@ -70,8 +71,8 @@ public:
         // [실행 로직] 2. PK는 그대로 둔 채 이메일 컬럼만 업데이트
         char query[256];
         snprintf(query, sizeof(query),
-                 "UPDATE USERS SET EMAIL = '%s' WHERE USER_NUM = %d", new_email.c_str(), user_pk);
-
+                 "UPDATE MEMBERSHIP SET DEFAULT_EMAIL = '%s' WHERE USER_NUM = %d", new_email.c_str(), user_pk);
+            
         if (mysql_query(conn, query))
         {
             std::cerr << "[User DB Error] 이메일 변경 실패: " << mysql_error(conn) << std::endl;

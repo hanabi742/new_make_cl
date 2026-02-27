@@ -20,8 +20,8 @@
 //     로컬 DB(127.0.0.1)   사용 시 : 본인 계정 선택
 // ─────────────────────────────────────────────────────────────
 // #define DB_USER "JIHOON"
-// #define DB_USER "HEECHANG"
-#define DB_USER "TAEHYEON"
+#define DB_USER "HEECHANG"
+// #define DB_USER "TAEHYEON"
 
 // ─────────────────────────────────────────────────────────────
 // [3] DB 공통 설정 (변경 불필요)

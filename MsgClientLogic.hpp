@@ -285,7 +285,7 @@ inline void menu_send() {
 
     // 전송 전 확인창
     printf("\n┌─────────────────────────────────────┐\n");
-    printf("│           전송 전 확인                │\n");
+    printf("│           전송 전 확인            │\n");
     printf("├─────────────────────────────────────┤\n");
     printf("│ 수신자: %-28s│\n", receiver);
     printf("│ 내용  : %-28s│\n", content);
