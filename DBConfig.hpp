@@ -39,5 +39,10 @@
 // ─────────────────────────────────────────────────────────────
 // [5] 이메일 발송 계정 (AuthManager — sendMailViaCurl)
 // ─────────────────────────────────────────────────────────────
-#define MAIL_FROM_ADDR "taehyunny0312@gmail.com"
-#define MAIL_APP_PASS "rnwz koev idvf mmna"
+#define MAIL_FROM_ADDR  "taehyunny0312@gmail.com"
+#define MAIL_APP_PASS   "rnwz koev idvf mmna"
+
+// ─────────────────────────────────────────────────────────────
+// [6] 관리자 계정 번호
+// ─────────────────────────────────────────────────────────────
+# define ADMIN_PK 8

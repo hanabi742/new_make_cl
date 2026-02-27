@@ -202,4 +202,11 @@ public:
 
         return is_blocked;
     }
+
+    bool check_admin(int user_pk)
+    {
+        if(user_pk == ADMIN_PK)
+            return true;
+        return false;
+    }
 };

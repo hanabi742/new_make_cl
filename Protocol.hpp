@@ -68,13 +68,14 @@ typedef enum
     PKT_RES_DELETE_FOLDER = 46, // 폴더 삭제 결과
 
     // --- 관리자 및 설정, 용량 조회 (100~311) ---
-    PKT_RES_HANDSHAKE = 100,
+    PKT_RES_HANDSHAKE = 100, 
     PKT_REQ_ADMIN_NOTICE = 200,
-    PKT_REQ_ADMIN_BAN = 201,
-    PKT_REQ_ADMIN_RESET = 202,
-    PKT_REQ_ADMIN_USAGE = 203,
-    PKT_REQ_USER_SETTINGS = 300,
-    PKT_RES_USER_SETTINGS = 301,
+    PKT_RES_ADMIN_NOTICE = 201,
+    PKT_REQ_ADMIN_BAN = 202,    
+    PKT_REQ_ADMIN_RESET = 204,  
+    PKT_REQ_ADMIN_USAGE = 206,  
+    PKT_REQ_USER_SETTINGS = 300, 
+    PKT_RES_USER_SETTINGS = 301, 
     PKT_REQ_STORAGE_INFO = 310, // 용량 정보 요청
     PKT_RES_STORAGE_INFO = 311, // 용량 정보 응답
 
@@ -116,11 +117,25 @@ struct AuthPacket
     char pwd_hash[65]; // 클라이언트가 SHA-256으로 변환해서 보낼 64자리 비밀번호 + NULL
     char name[10];     // [추가] 회원가입 시 받을 이름 필드 (ERD varchar(5) 고려)
 };
+#pragma pack(pop)
 
+#pragma pack(push, 1)
 struct AuthResponse
 {
     int16_t type;    // PKT_RES_REGISTER 또는 PKT_RES_LOGIN
     int32_t user_pk; // 성공 시 발급/조회된 고유 PK (실패 시 -1)
+    int is_admin; // 0: 일반, 1: 관리자
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct ServerHandshakeHeader    // 서버 접속 직후 클라이언트가 무조건 처음 받게 되는 헤더 패킷
+{
+    int16_t type;               // 항상 PKT_RES_HANDSHAKE (100)
+    float server_version;       // 서버의 현재 버전 (예: 1.2)
+    int32_t current_users;      // 현재 접속자 수
+    int32_t max_users;          // 서버 최대 수용 인원
+    int32_t next_port;          // 포트 변경이 예정되어 있다면 해당 포트 번호 (없으면 0)
 };
 #pragma pack(pop)
 
