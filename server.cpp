@@ -75,7 +75,8 @@ int main()
     cout << "[Server] 클라이언트 접속 대기 중... (Port: 9000)" << endl;
 
     // 클라이언트 1명을 처리하는 람다 (스레드로 실행됨)
-    auto handle_client = [&](int client_sock)
+    // auto handle_client = [&](int client_sock)
+    auto handle_client = [&](int client_sock, string client_ip)
     {
         FilePacket *packet = new FilePacket();
 
@@ -383,7 +384,7 @@ int main()
                     case PKT_REQ_ADMIN_NOTICE:
                     {
                         AdminPacket *admin_pkt = (AdminPacket *)packet;
-                        if (admin_pkt->admin_pk == 8)
+                        if (admin.check_admin(admin_pkt->admin_pk))
                         {
                             admin.sendGlobalNotice(admin_pkt->data);
                         }
@@ -393,7 +394,7 @@ int main()
                     case PKT_REQ_ADMIN_BAN:
                     {
                         AdminPacket *admin_pkt = (AdminPacket *)packet; //
-                        if (admin_pkt->admin_pk == 8)
+                        if (admin.check_admin(admin_pkt->admin_pk))
                         {
                             admin.banUser(admin_pkt->target_pk);
                         }
@@ -403,7 +404,7 @@ int main()
                     case PKT_REQ_ADMIN_RESET:
                     {
                         AdminPacket *admin_pkt = (AdminPacket *)packet;
-                        if (admin_pkt->admin_pk == 8)
+                        if (admin.check_admin(admin_pkt->admin_pk))
                         {
                             admin.resetSystem();
                         }
@@ -506,9 +507,7 @@ int main()
         
         // 클라이언트마다 별도 스레드로 처리 (서버는 계속 대기)
         // thread(handle_client, client_sock).detach();
-        thread(handle_client, client_sock, string(client_ip),
-            ref(auth), ref(storage), ref(user_mgr), ref(admin))
-            .detach();
+        thread(handle_client, client_sock, string(client_ip)).detach();
     }
 
     close(server_sock);

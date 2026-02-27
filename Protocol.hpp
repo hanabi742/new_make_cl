@@ -121,6 +121,7 @@ struct AuthResponse
 {
     int16_t type;    // PKT_RES_REGISTER 또는 PKT_RES_LOGIN
     int32_t user_pk; // 성공 시 발급/조회된 고유 PK (실패 시 -1)
+    int is_admin; // 0: 일반, 1: 관리자
 };
 #pragma pack(pop)
 

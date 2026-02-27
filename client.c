@@ -609,6 +609,75 @@ void menu_hub(int sock, int user_pk, const char *email)
     }
 }
 
+// 관리자 확인 함수
+bool check_admin(int user_pk)
+{
+    if(user_pk == ADMIN_PK)
+        return true;
+    return false;
+}
+
+// 관리자 요청 전송 함수
+void request_admin_action(int sock, int admin_pk, int target_pk, int type, const char* message) {
+    AdminPacket pkt = {0};
+    pkt.type = type;         // PKT_REQ_ADMIN_NOTICE, PKT_REQ_ADMIN_BAN 등
+    pkt.admin_pk = admin_pk; // 관리자 여부 확인용 (서버에선 PK 1번을 관리자로 간주)
+    pkt.target_pk = target_pk;
+    
+    if (message != NULL) {
+        strncpy(pkt.data, message, sizeof(pkt.data) - 1);
+    }
+
+    if (send(sock, (char*)&pkt, sizeof(AdminPacket), 0) <= 0) {
+        printf("  [Error] 관리자 요청 전송 실패\n");
+        return;
+    }
+    printf("  [System] 관리자 명령이 서버로 전달되었습니다.\n");
+}
+
+// 관리자 전용 메뉴
+void admin_menu(int sock, int admin_pk) {
+    int choice;
+    while (1) {
+        CLEAR();
+        printf("  ===== 관리자 모드 (PK: %d) =====\n", admin_pk);
+        printf("  1. 전체 공지사항 발송\n");
+        printf("  2. 특정 유저 차단 (BAN)\n");
+        printf("  3. 시스템 전체 초기화 (주의!)\n");
+        printf("  0. 일반 메뉴로\n");
+        printf("  선택: ");
+        scanf("%d", &choice);
+        FLUSH_STDIN();
+
+        if (choice == 0) break;
+
+        if (choice == 1) {
+            char notice[256];
+            printf("  공지 내용: ");
+            fgets(notice, sizeof(notice), stdin);
+            notice[strcspn(notice, "\n")] = 0; // 개행 제거
+            request_admin_action(sock, admin_pk, 0, PKT_REQ_ADMIN_NOTICE, notice);
+        }
+        else if (choice == 2) {
+            int target;
+            printf("  차단할 유저 PK: ");
+            scanf("%d", &target);
+            FLUSH_STDIN();
+            request_admin_action(sock, admin_pk, target, PKT_REQ_ADMIN_BAN, NULL);
+        }
+        else if (choice == 3) {
+            char confirm[10];
+            printf("  정말로 초기화하시겠습니까? (yes/no): ");
+            scanf("%9s", confirm);
+            FLUSH_STDIN();
+            if (strcmp(confirm, "yes") == 0) {
+                request_admin_action(sock, admin_pk, 0, PKT_REQ_ADMIN_RESET, NULL);
+            }
+        }
+        PAUSE();
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
 //  main
 // ═══════════════════════════════════════════════════════════
@@ -626,6 +695,10 @@ int main()
         perror("[Error] 서버 연결 실패");
         return -1;
     }
+    struct ServerHandshakeHeader hand;
+    recv_all(sock, (char*)&hand, sizeof(hand)); 
+    printf("  [System] 서버 버전: %.1f, 현재 접속자: %d/%d\n", 
+    hand.server_version, hand.current_users, hand.max_users);
 
     CLEAR();
     printf("  [System] 서버(%s) 접속 성공!\n\n", target_ip);
@@ -700,6 +773,18 @@ int main()
             if (user_pk > 0)
             {
                 printf("  [Success] 로그인 성공!\n");
+                if (check_admin(user_pk))
+                {
+                    printf("  [System] 관리자 계정으로 인식되었습니다.\n");
+                    printf("  관리자 메뉴를 여시겠습니까? (1: Yes / 0: No): ");
+                    int go_admin;
+                    scanf("%d", &go_admin);
+                    FLUSH_STDIN();
+                    if (go_admin == 1)
+                    {
+                        admin_menu(sock, user_pk);
+                    }
+                }
             }
             else
             {
