@@ -61,33 +61,36 @@ public:
     // [설계 4] 현재 접속 중인 클라이언트 수 확인 (Mutex를 활용한 안전한 접근)
     int getCurrentClientCount()
     {
-        if (!client_sockets || !v_mtx)
-            return 0;
-
-        std::lock_guard<std::mutex> lock(*v_mtx);
-        return client_sockets->size();
+        if (v_mtx && client_sockets)
+        {
+            std::lock_guard<std::mutex> lock(*v_mtx);
+            return (int)client_sockets->size();
+        }
+        return 0;
     }
 
     // [설계 1] 1000GB 기준 서버 전체 사용량 및 잔여 용량 반환
-    void getCloudUsageStatus(long long &out_used_bytes, long long &out_remain_bytes)
+    void getCloudUsageStatus(long long &out_used, long long &out_remain)
     {
-        out_used_bytes = 0;
-        if (!conn)
-            return;
+        // 1. 총 할당 용량 (1000GB)
+        long long total_limit = 1000LL * 1024 * 1024 * 1024;
 
+        // 2. 현재 모든 유저의 사용량 합산 조회
         const char *query = "SELECT SUM(FILE_SIZE) FROM FILE_PATH";
+        out_used = 0;
+
         if (mysql_query(conn, query) == 0)
         {
-            MYSQL_RES *result = mysql_store_result(conn);
-            if (result)
+            MYSQL_RES *res = mysql_store_result(conn);
+            if (res)
             {
-                MYSQL_ROW row = mysql_fetch_row(result);
+                MYSQL_ROW row = mysql_fetch_row(res);
                 if (row && row[0])
-                    out_used_bytes = std::stoll(row[0]);
-                mysql_free_result(result);
+                    out_used = std::stoll(row[0]);
+                mysql_free_result(res);
             }
         }
-        out_remain_bytes = TOTAL_CLOUD_CAPACITY - out_used_bytes;
+        out_remain = total_limit - out_used;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -95,28 +98,37 @@ public:
     // ─────────────────────────────────────────────────────────────
 
     // [설계 2] 블랙리스트 추가 (IP와 계정을 동시에 묶어서 완벽 차단)
-    bool addCombinedBlacklist(const std::string &ip, int user_pk, const std::string &reason)
+    bool addCombinedBlacklist(int admin_pk, const std::string &ip, int target_pk, const std::string &reason)
     {
-        if (!conn)
-            return false;
-
-        // 1. IP와 PK를 블랙리스트 테이블에 동시 기록
-        char query[512];
-        snprintf(query, sizeof(query),
-                 "INSERT INTO BLACKLIST (IP_ADDRESS, USER_NUM, REASON) VALUES ('%s', %d, '%s')",
-                 ip.c_str(), user_pk, reason.c_str());
-
-        if (mysql_query(conn, query))
+        // 1. 권한 검사 (PK 1번이 아니면 즉시 거부)
+        if (admin_pk != 1)
         {
-            std::cerr << "[Admin Error] 블랙리스트 등록 실패: " << mysql_error(conn) << std::endl;
+            std::cerr << "[Security Alert] 비인가 사용자의 차단 시도!" << std::endl;
             return false;
         }
 
-        // 2. 해당 유저의 계정 상태를 BANNED로 즉시 변경
-        snprintf(query, sizeof(query), "UPDATE MEMBERSHIP SET STATUS = 'BANNED' WHERE USER_NUM = %d", user_pk);
-        mysql_query(conn, query);
+        if (!conn)
+            return false;
 
-        std::cout << "[Admin] 보안 조치 완료: IP(" << ip << ") 및 유저(PK: " << user_pk << ") 동시 차단됨." << std::endl;
+        char query[1024];
+        // 테이블 구조에 맞춰 쿼리 구성 (BLACKLIST_ID는 auto_increment이므로 제외)
+        snprintf(query, sizeof(query),
+                 "INSERT INTO ADMIN_BLACKLIST (IP_ADDRESS, USER_NUM, REASON) VALUES ('%s', %d, '%s')",
+                 ip.c_str(), target_pk, reason.c_str());
+
+        if (mysql_query(conn, query))
+        {
+            std::cerr << "[Admin DB Error] 차단 기록 실패: " << mysql_error(conn) << std::endl;
+            return false;
+        }
+
+        // 추가로 MEMBERSHIP 테이블의 상태도 'BANNED'로 변경 (로그인 차단용)
+        char update_query[256];
+        snprintf(update_query, sizeof(update_query),
+                 "UPDATE MEMBERSHIP SET GRADE = 'BANNED' WHERE USER_NUM = %d", target_pk);
+        mysql_query(conn, update_query);
+
+        std::cout << "[Admin] 보안 조치 완료: IP(" << ip << ") 및 유저(" << target_pk << ") 영구 차단." << std::endl;
         return true;
     }
 
@@ -159,56 +171,48 @@ public:
     }
 
     // [설계 3] PK 1번 비밀번호 검증 후 시스템 전체 초기화
-    bool resetSystemWithAuth(int admin_pk, const std::string &input_pw)
+    bool resetSystemWithAuth(int admin_pk, const std::string &input_pwd_hash)
     {
-        if (!isMasterAdmin(admin_pk) || !conn)
-        {
-            std::cerr << "[Admin Error] 권한이 없거나 DB에 연결할 수 없습니다." << std::endl;
-            return false;
-        }
-
-        // 1. 관리자(PK:1)의 비밀번호 해시를 DB에서 가져와 비교 검증
-        char auth_query[256];
-        snprintf(auth_query, sizeof(auth_query), "SELECT PW FROM MEMBERSHIP WHERE USER_NUM = 1");
-
-        if (mysql_query(conn, auth_query))
+        if (admin_pk != 1)
             return false;
 
+        // DB에서 PK 1번의 실제 비밀번호 해시를 가져와 비교
+        char check_query[256];
+        snprintf(check_query, sizeof(check_query), "SELECT PW FROM MEMBERSHIP WHERE USER_NUM = 1");
+
+        if (mysql_query(conn, check_query))
+            return false;
         MYSQL_RES *res = mysql_store_result(conn);
-        MYSQL_ROW row = mysql_fetch_row(res);
-
-        // 데이터가 없거나 비밀번호가 일치하지 않으면 거부
-        if (!row || input_pw != row[0])
-        {
-            std::cout << "[Admin Warning] 관리자 인증 실패: 비밀번호 불일치." << std::endl;
-            mysql_free_result(res);
+        if (!res)
             return false;
-        }
+
+        MYSQL_ROW row = mysql_fetch_row(res);
+        std::string admin_db_pw = (row && row[0]) ? row[0] : "";
         mysql_free_result(res);
 
-        // 2. 인증 성공 시 데이터 소멸 진행 (테이블 구조는 남김)
-        std::cout << "[Admin Warning] 비밀번호 인증 완료. 시스템 초기화를 시작합니다..." << std::endl;
-
-        // 외래키 무결성 체크를 임시 해제하고 데이터를 날린 뒤 다시 켭니다.
-        const char *queries[] = {
-            "SET FOREIGN_KEY_CHECKS = 0",
-            "TRUNCATE TABLE FILE_PATH",
-            "DELETE FROM MEMBERSHIP WHERE USER_NUM > 1", // PK 1번(운영자) 본인은 삭제 제외
-            "TRUNCATE TABLE BLACKLIST",
-            "SET FOREIGN_KEY_CHECKS = 1"};
-
-        for (const char *q : queries)
+        if (input_pwd_hash != admin_db_pw)
         {
-            if (mysql_query(conn, q))
-            {
-                std::cerr << "[Admin Error] 초기화 중 DB 오류 발생: " << mysql_error(conn) << std::endl;
-                return false;
-            }
+            std::cerr << "[Admin] 초기화 거부: 운영자 비밀번호가 일치하지 않습니다." << std::endl;
+            return false;
         }
 
-        // 3. 실제 물리적 파일들도 모두 철거
-        storage.clearAllPhysicalFiles();
-        std::cout << "[Admin] 시스템 전체 초기화가 안전하게 완료되었습니다." << std::endl;
+        // 실제 삭제 로직 (TABLE은 남기고 데이터만 소멸)
+        const char *cleanup_queries[] = {
+            "DELETE FROM FILE_PATH",
+            "DELETE FROM MESSAGE",
+            "DELETE FROM BLACKLIST",                     // 일반 유저 차단 목록
+            "DELETE FROM ADMIN_BLACKLIST",               // 관리자 차단 목록
+            "DELETE FROM MEMBERSHIP WHERE USER_NUM > 1", // 관리자 제외 전원 삭제
+            "ALTER TABLE FILE_PATH AUTO_INCREMENT = 1",
+            "ALTER TABLE MEMBERSHIP AUTO_INCREMENT = 2"};
+
+        for (const char *q : cleanup_queries)
+        {
+            mysql_query(conn, q);
+        }
+
+        storage.clearAllPhysicalFiles(); // 물리적 파일도 삭제
+        std::cout << "[Admin] 시스템 전체 초기화가 완료되었습니다." << std::endl;
         return true;
     }
 

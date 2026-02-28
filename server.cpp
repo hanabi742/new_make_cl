@@ -178,8 +178,9 @@ int main()
                     size_t current_used = storage.getUserTotalUsed(packet->user_pk);
 
                     // getRemainingQuota 함수로 '남은 용량'을 정확히 계산
-                    long long remaining_quota = storage.getRemainingQuota(packet->user_pk, max_quota);
-
+                    long long max_quota = auth.getUserMaxStorage(packet->user_pk);
+                    long long current_used = storage.getUserTotalUsed(packet->user_pk);
+                    long long remaining_quota = max_quota - current_used;
                     if (current_file_size > remaining_quota)
                     {
                         cout << "[거부] 용량 초과! (남은 용량: " << remaining_quota << " 바이트)" << endl;
