@@ -61,8 +61,9 @@ public:
     // [설계 4] 현재 접속 중인 클라이언트 수 확인 (Mutex를 활용한 안전한 접근)
     int getCurrentClientCount()
     {
-        if (!client_sockets || !v_mtx) return 0;
-        
+        if (!client_sockets || !v_mtx)
+            return 0;
+
         std::lock_guard<std::mutex> lock(*v_mtx);
         return client_sockets->size();
     }
@@ -71,7 +72,8 @@ public:
     void getCloudUsageStatus(long long &out_used_bytes, long long &out_remain_bytes)
     {
         out_used_bytes = 0;
-        if (!conn) return;
+        if (!conn)
+            return;
 
         const char *query = "SELECT SUM(FILE_SIZE) FROM FILE_PATH";
         if (mysql_query(conn, query) == 0)
@@ -80,7 +82,8 @@ public:
             if (result)
             {
                 MYSQL_ROW row = mysql_fetch_row(result);
-                if (row && row[0]) out_used_bytes = std::stoll(row[0]);
+                if (row && row[0])
+                    out_used_bytes = std::stoll(row[0]);
                 mysql_free_result(result);
             }
         }
@@ -94,7 +97,8 @@ public:
     // [설계 2] 블랙리스트 추가 (IP와 계정을 동시에 묶어서 완벽 차단)
     bool addCombinedBlacklist(const std::string &ip, int user_pk, const std::string &reason)
     {
-        if (!conn) return false;
+        if (!conn)
+            return false;
 
         // 1. IP와 PK를 블랙리스트 테이블에 동시 기록
         char query[512];
@@ -119,7 +123,8 @@ public:
     // 통합 접근 거부 검증 (접속 시 IP 확인, 로그인 시 PK 추가 확인)
     bool isAccessDenied(const std::string &ip, int user_pk = -1)
     {
-        if (!conn) return false;
+        if (!conn)
+            return false;
 
         char query[512];
         if (user_pk == -1)
@@ -133,8 +138,9 @@ public:
                      "SELECT 1 FROM BLACKLIST WHERE IP_ADDRESS = '%s' OR USER_NUM = %d", ip.c_str(), user_pk);
         }
 
-        if (mysql_query(conn, query)) return false;
-        
+        if (mysql_query(conn, query))
+            return false;
+
         MYSQL_RES *result = mysql_store_result(conn);
         bool is_blocked = (result && mysql_num_rows(result) > 0);
         mysql_free_result(result);
@@ -155,7 +161,7 @@ public:
     // [설계 3] PK 1번 비밀번호 검증 후 시스템 전체 초기화
     bool resetSystemWithAuth(int admin_pk, const std::string &input_pw)
     {
-        if (!isMasterAdmin(admin_pk) || !conn) 
+        if (!isMasterAdmin(admin_pk) || !conn)
         {
             std::cerr << "[Admin Error] 권한이 없거나 DB에 연결할 수 없습니다." << std::endl;
             return false;
@@ -164,18 +170,19 @@ public:
         // 1. 관리자(PK:1)의 비밀번호 해시를 DB에서 가져와 비교 검증
         char auth_query[256];
         snprintf(auth_query, sizeof(auth_query), "SELECT PW FROM MEMBERSHIP WHERE USER_NUM = 1");
-        
-        if (mysql_query(conn, auth_query)) return false;
-        
+
+        if (mysql_query(conn, auth_query))
+            return false;
+
         MYSQL_RES *res = mysql_store_result(conn);
         MYSQL_ROW row = mysql_fetch_row(res);
-        
+
         // 데이터가 없거나 비밀번호가 일치하지 않으면 거부
-        if (!row || input_pw != row[0]) 
+        if (!row || input_pw != row[0])
         {
             std::cout << "[Admin Warning] 관리자 인증 실패: 비밀번호 불일치." << std::endl;
             mysql_free_result(res);
-            return false; 
+            return false;
         }
         mysql_free_result(res);
 
@@ -188,8 +195,7 @@ public:
             "TRUNCATE TABLE FILE_PATH",
             "DELETE FROM MEMBERSHIP WHERE USER_NUM > 1", // PK 1번(운영자) 본인은 삭제 제외
             "TRUNCATE TABLE BLACKLIST",
-            "SET FOREIGN_KEY_CHECKS = 1"
-        };
+            "SET FOREIGN_KEY_CHECKS = 1"};
 
         for (const char *q : queries)
         {
@@ -210,5 +216,29 @@ public:
     void sendGlobalNotice(const std::string &message)
     {
         std::cout << "[Admin System] 전체 공지 큐 등록: " << message << std::endl;
+    }
+    // 💡 전체 공지 메시지 발송 및 DB 저장
+    void saveGlobalNoticeToDB(int admin_pk, const std::string &message)
+    {
+        if (!conn)
+            return;
+        char safe_msg[1024];
+        mysql_real_escape_string(conn, safe_msg, message.c_str(), message.size());
+
+        char query[2048];
+        // MEMBERSHIP에 있는 모든 유저의 ID를 가져와서 개별 메시지로 일괄 저장합니다!
+        snprintf(query, sizeof(query),
+                 "INSERT INTO MESSAGE (SEND_USER, TAKE_USER, DETAIL, READ_STATUS, CREATED_AT, USER_NUM) "
+                 "SELECT %d, ID, '%s', 1, NOW(), %d FROM MEMBERSHIP",
+                 admin_pk, safe_msg, admin_pk);
+
+        if (mysql_query(conn, query))
+        {
+            std::cerr << "[Admin System] 공지사항 DB 저장 실패: " << mysql_error(conn) << std::endl;
+        }
+        else
+        {
+            std::cout << "[Admin System] 전체 공지 DB(MESSAGE 테이블) 저장 완료." << std::endl;
+        }
     }
 };

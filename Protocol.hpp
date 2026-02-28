@@ -68,14 +68,14 @@ typedef enum
     PKT_RES_DELETE_FOLDER = 46, // 폴더 삭제 결과
 
     // --- 관리자 및 설정, 용량 조회 (100~311) ---
-    PKT_RES_HANDSHAKE = 100, 
+    PKT_RES_HANDSHAKE = 100,
     PKT_REQ_ADMIN_NOTICE = 200,
     PKT_RES_ADMIN_NOTICE = 201,
-    PKT_REQ_ADMIN_BAN = 202,    
-    PKT_REQ_ADMIN_RESET = 204,  
-    PKT_REQ_ADMIN_USAGE = 206,  
-    PKT_REQ_USER_SETTINGS = 300, 
-    PKT_RES_USER_SETTINGS = 301, 
+    PKT_REQ_ADMIN_BAN = 202,
+    PKT_REQ_ADMIN_RESET = 204,
+    PKT_REQ_ADMIN_USAGE = 206,
+    PKT_REQ_USER_SETTINGS = 300,
+    PKT_RES_USER_SETTINGS = 301,
     PKT_REQ_STORAGE_INFO = 310, // 용량 정보 요청
     PKT_RES_STORAGE_INFO = 311, // 용량 정보 응답
 
@@ -125,19 +125,22 @@ struct AuthPacket
 struct AuthResponse
 {
     int16_t type;    // PKT_RES_REGISTER 또는 PKT_RES_LOGIN
-    int32_t user_pk; // 성공 시 발급/조회된 고유 PK (실패 시 -1)
-    int is_admin; // 0: 일반, 1: 관리자
+    int32_t user_pk; // 성공 시 유저 PK, 실패 시 -1
+    int is_admin;    // 0: 일반, 1: 관리자
+
+    // 💡 이 필드가 서버와 클라이언트 양쪽에 똑같이 있어야 '데이터 크기'가 맞아떨어집니다.
+    char download_path[131];
 };
 #pragma pack(pop)
 
 #pragma pack(push, 1)
-struct ServerHandshakeHeader    // 서버 접속 직후 클라이언트가 무조건 처음 받게 되는 헤더 패킷
+struct ServerHandshakeHeader // 서버 접속 직후 클라이언트가 무조건 처음 받게 되는 헤더 패킷
 {
-    int16_t type;               // 항상 PKT_RES_HANDSHAKE (100)
-    float server_version;       // 서버의 현재 버전 (예: 1.2)
-    int32_t current_users;      // 현재 접속자 수
-    int32_t max_users;          // 서버 최대 수용 인원
-    int32_t next_port;          // 포트 변경이 예정되어 있다면 해당 포트 번호 (없으면 0)
+    int16_t type;          // 항상 PKT_RES_HANDSHAKE (100)
+    float server_version;  // 서버의 현재 버전 (예: 1.2)
+    int32_t current_users; // 현재 접속자 수
+    int32_t max_users;     // 서버 최대 수용 인원
+    int32_t next_port;     // 포트 변경이 예정되어 있다면 해당 포트 번호 (없으면 0)
 };
 #pragma pack(pop)
 
@@ -157,6 +160,24 @@ struct UserSettingsPacket
     int16_t type;         // PKT_REQ_USER_SETTINGS
     int32_t user_pk;      // 변경을 요청하는 유저의 PK
     int32_t setting_type; // 1: 이름 변경, 2: 비밀번호 변경
-    char new_data[131];    // 새 이름, 또는 해시화된 새 비밀번호
+    char new_data[131];   // 새 이름, 또는 해시화된 새 비밀번호
+};
+#pragma pack(pop)
+
+#pragma pack(push, 1)
+struct BlacklistReqPacket
+{
+    int16_t type;
+    int32_t self_user_num;
+    int32_t blacklist_num;
+    char target_email[128];
+};
+struct BlacklistResPacket
+{
+    int16_t type;
+    int32_t result_code;
+    int32_t blacklist_num;
+    char target_email[128];
+    char created_at[20];
 };
 #pragma pack(pop)

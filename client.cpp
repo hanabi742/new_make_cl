@@ -5,18 +5,21 @@
 #include <arpa/inet.h>
 #include <openssl/sha.h>
 #include <termios.h>
+
+// 💡 통신 규격과 메시지 시스템 헤더만 포함합니다. (서버 전용 DB 헤더는 제외)
 #include "Protocol.hpp"
 #include "msg_client.h"
-#include "UserManager.hpp"
-#include "AdminManager.hpp"
 
 #define OPENSSL_API_COMPAT 0x30000000L
 
 // ═══════════════════════════════════════════════════════════
-//  공통 유틸 매크로
+//  [1] 전역 변수 및 공통 유틸 매크로
 // ═══════════════════════════════════════════════════════════
 
-// ANSI 화면 클리어 + 커서 맨 위
+// 💡 사용자 지정 다운로드 경로를 저장하는 전역 변수
+char g_download_path[131] = "";
+
+// 화면 클리어 (리눅스 ANSI 시퀀스)
 #define CLEAR()                  \
     do                           \
     {                            \
@@ -24,7 +27,7 @@
         fflush(stdout);          \
     } while (0)
 
-// scanf 후 stdin 버퍼에 남은 개행/문자 제거 (서브메뉴 오입력 원천 차단)
+// 입력 버퍼 비우기 (메뉴에서 오작동 방지)
 #define FLUSH_STDIN()                                 \
     do                                                \
     {                                                 \
@@ -33,7 +36,7 @@
             ;                                         \
     } while (0)
 
-// 결과 출력 후 Enter 대기
+// 결과 출력 후 엔터 대기
 #define PAUSE()                        \
     do                                 \
     {                                  \
@@ -41,9 +44,7 @@
         FLUSH_STDIN();                 \
     } while (0)
 
-// ═══════════════════════════════════════════════════════════
-//  네트워크 헬퍼
-// ═══════════════════════════════════════════════════════════
+// 네트워크 데이터 수신 보장 함수 (지정한 size만큼 모두 받을 때까지 대기)
 int recv_all(int sock, char *buf, int size)
 {
     int total = 0;
@@ -58,49 +59,29 @@ int recv_all(int sock, char *buf, int size)
 }
 
 // ═══════════════════════════════════════════════════════════
-//  유틸 함수
+//  [2] 보안 및 유틸리티 함수
 // ═══════════════════════════════════════════════════════════
-void get_default_download_path(const char *filename, char *out_path)
+
+// 파일 다운로드 경로 설정 (사용자 지정 경로가 있으면 우선 적용)
+void get_custom_download_path(const char *filename, char *out_path, const char *saved_path)
 {
-    const char *home = getenv("HOME");
-    if (!home)
-        home = getenv("USERPROFILE");
-    if (home)
-        sprintf(out_path, "%s/Downloads/%s", home, filename);
+    if (saved_path != NULL && strlen(saved_path) > 0)
+    {
+        sprintf(out_path, "%s/%s", saved_path, filename);
+    }
     else
-        strcpy(out_path, filename);
-}
-void delete_folder(int sock, int user_pk)
-{
-    struct FilePacket pkt;
-    memset(&pkt, 0, sizeof(pkt));
-    pkt.type = 45;
-    pkt.user_pk = user_pk;
-    send(sock, (char *)&pkt, sizeof(pkt), 0);
-    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.type == 46)
     {
-        if (pkt.file_pk == 1)
-            printf("  [Success] 폴더 철거 완료.\n");
+        const char *home = getenv("HOME");
+        if (!home)
+            home = getenv("USERPROFILE");
+        if (home)
+            sprintf(out_path, "%s/Downloads/%s", home, filename);
         else
-            printf("  [Error] 삭제 거부! 폴더 안에 파일이 남아있습니다.\n");
+            strcpy(out_path, filename);
     }
 }
 
-void check_storage_quota(int sock, int user_pk)
-{
-    struct FilePacket pkt;
-    memset(&pkt, 0, sizeof(pkt));
-    pkt.type = 310;
-    pkt.user_pk = user_pk;
-    send(sock, (char *)&pkt, sizeof(pkt), 0);
-    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.type == 311)
-    {
-        long max_mb = pkt.file_size / (1024 * 1024);
-        long remain_mb = pkt.offset / (1024 * 1024);
-        printf("\n  [ 총 제공: %ld MB | 사용 중: %ld MB | 남은 용량: %ld MB ]\n", max_mb, max_mb - remain_mb, remain_mb);
-    }
-}
-
+// SHA-256 단방향 암호화 (비밀번호 보호)
 void hash_password(const char *plain, char *out)
 {
     unsigned char hash[SHA256_DIGEST_LENGTH];
@@ -109,16 +90,19 @@ void hash_password(const char *plain, char *out)
     SHA256_Update(&ctx, plain, strlen(plain));
     SHA256_Final(hash, &ctx);
     for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+    {
         sprintf(out + i * 2, "%02x", hash[i]);
+    }
     out[64] = '\0';
 }
 
+// 콘솔에서 비밀번호 입력 시 '*' 기호로 마스킹 처리
 void input_password(const char *prompt, char *buf, int max_len)
 {
     struct termios oldt, newt;
     tcgetattr(STDIN_FILENO, &oldt);
     newt = oldt;
-    newt.c_lflag &= ~(ECHO | ICANON);
+    newt.c_lflag &= ~(ECHO | ICANON); // 에코 기능 끄기
     tcsetattr(STDIN_FILENO, TCSANOW, &newt);
 
     printf("%s", prompt);
@@ -128,76 +112,72 @@ void input_password(const char *prompt, char *buf, int max_len)
     while ((c = getchar()) != '\n' && c != EOF && i < max_len - 1)
     {
         if (c == 127 || c == '\b')
-        {
-            if (i > 0) { i--; printf("\b \b"); fflush(stdout); }
-        }
-        else { buf[i++] = (char)c; printf("*"); fflush(stdout); }
-    }
-    buf[i] = '\0';
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-    printf("\n");
-}
-
-int validate_password(const char *pw)
-{
-    int len = (int)strlen(pw);
-    if (len < 5 || len > 15) { printf("  [Error] 비밀번호는 5~15자여야 합니다.\n"); return 0; }
-    int has_alpha = 0, has_digit = 0;
-    for (int i = 0; i < len; i++)
-    {
-        if ((pw[i]>='a'&&pw[i]<='z')||(pw[i]>='A'&&pw[i]<='Z')) has_alpha = 1;
-        else if (pw[i]>='0'&&pw[i]<='9') has_digit = 1;
-        else { printf("  [Error] 영문자와 숫자만 사용할 수 있습니다.\n"); return 0; }
-    }
-    if (!has_alpha || !has_digit) { printf("  [Error] 영문자와 숫자를 반드시 혼합해야 합니다.\n"); return 0; }
-    return 1;
-}
-void delete_file(int sock, int user_pk, int file_pk)
-{
-    struct FilePacket pkt;
-    memset(&pkt, 0, sizeof(pkt));
-
-    // 삭제 요청 패킷 세팅
-    pkt.type = PKT_REQ_DELETE; // Protocol.hpp에 정의되어 있어야 함
-    pkt.user_pk = user_pk;
-    pkt.file_pk = file_pk;
-
-    printf("  [System] 서버에 파일 삭제를 요청합니다...\n");
-    send(sock, (char *)&pkt, sizeof(pkt), 0);
-
-    // 서버의 응답 대기
-    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0)
-    {
-        if (pkt.type == PKT_RES_DELETE && pkt.file_pk == 1)
-        {
-            printf("  [Success] 파일(PK: %d)이 성공적으로 삭제되었습니다.\n", file_pk);
-            printf("  [System] 남은 저장소 용량이 복구되었습니다!\n");
+        { // 백스페이스 처리
+            if (i > 0)
+            {
+                i--;
+                printf("\b \b");
+                fflush(stdout);
+            }
         }
         else
         {
-            printf("  [Error] 파일 삭제 실패. (권한이 없거나 이미 삭제된 파일입니다)\n");
+            buf[i++] = (char)c;
+            printf("*");
+            fflush(stdout);
         }
     }
-    else
+    buf[i] = '\0';
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt); // 에코 기능 복구
+    printf("\n");
+}
+
+// 비밀번호 유효성 검사 (영문+숫자 혼합, 5~15자)
+int validate_password(const char *pw)
+{
+    int len = (int)strlen(pw);
+    if (len < 5 || len > 15)
     {
-        printf("  [Error] 서버 응답이 없습니다.\n");
+        printf("  [Error] 비밀번호는 5~15자여야 합니다.\n");
+        return 0;
     }
+    int has_alpha = 0, has_digit = 0;
+    for (int i = 0; i < len; i++)
+    {
+        if ((pw[i] >= 'a' && pw[i] <= 'z') || (pw[i] >= 'A' && pw[i] <= 'Z'))
+            has_alpha = 1;
+        else if (pw[i] >= '0' && pw[i] <= '9')
+            has_digit = 1;
+        else
+        {
+            printf("  [Error] 영문자와 숫자만 사용할 수 있습니다.\n");
+            return 0;
+        }
+    }
+    if (!has_alpha || !has_digit)
+    {
+        printf("  [Error] 영문자와 숫자를 반드시 혼합해야 합니다.\n");
+        return 0;
+    }
+    return 1;
 }
 
 // ═══════════════════════════════════════════════════════════
-//  인증
+//  [3] 인증 관련 함수 (이메일 인증, 회원가입, 로그인)
 // ═══════════════════════════════════════════════════════════
+
+// 이메일 인증 번호 요청 및 검증
 int handle_email_auth(int sock, char *out_email)
 {
     char code[16];
     struct FilePacket pkt;
-
     printf("  이메일 주소: ");
     scanf("%63s", out_email);
     FLUSH_STDIN();
 
+    // 1. 서버로 인증 메일 발송 요청
     memset(&pkt, 0, sizeof(pkt));
-    pkt.type = 20;
+    pkt.type = PKT_REQ_EMAIL_AUTH;
     strncpy(pkt.data, out_email, sizeof(pkt.data) - 1);
     send(sock, (char *)&pkt, sizeof(pkt), 0);
 
@@ -208,12 +188,13 @@ int handle_email_auth(int sock, char *out_email)
         return 0;
     }
 
+    // 2. 인증번호 입력 및 서버 검증
     printf("  [Success] 메일 발송 완료. 6자리 인증번호: ");
     scanf("%15s", code);
     FLUSH_STDIN();
 
     memset(&pkt, 0, sizeof(pkt));
-    pkt.type = 22;
+    pkt.type = PKT_REQ_EMAIL_VERIFY;
     strncpy(pkt.data, code, sizeof(pkt.data) - 1);
     send(sock, (char *)&pkt, sizeof(pkt), 0);
 
@@ -226,6 +207,7 @@ int handle_email_auth(int sock, char *out_email)
     return 0;
 }
 
+// 서버에 로그인 또는 회원가입 요청
 int request_auth(int sock, int type, const char *id, const char *plain_pwd, const char *name)
 {
     struct AuthPacket req;
@@ -240,12 +222,34 @@ int request_auth(int sock, int type, const char *id, const char *plain_pwd, cons
     struct AuthResponse res;
     if (recv_all(sock, (char *)&res, sizeof(res)) <= 0)
         return -1;
+
+    // 💡 로그인 성공 시, 서버가 보내준 유저 고유의 다운로드 경로를 전역 변수에 저장
+    if (res.user_pk > 0 && type == PKT_REQ_LOGIN)
+    {
+        strncpy(g_download_path, res.download_path, sizeof(g_download_path) - 1);
+    }
     return res.user_pk;
 }
 
 // ═══════════════════════════════════════════════════════════
-//  파일 기능
+//  [4] 파일 클라우드 시스템 (업로드, 다운로드, 관리)
 // ═══════════════════════════════════════════════════════════
+
+void check_storage_quota(int sock, int user_pk)
+{
+    struct FilePacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.type = PKT_REQ_STORAGE_INFO;
+    pkt.user_pk = user_pk;
+    send(sock, (char *)&pkt, sizeof(pkt), 0);
+    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.type == PKT_RES_STORAGE_INFO)
+    {
+        long max_mb = pkt.file_size / (1024 * 1024);
+        long remain_mb = pkt.offset / (1024 * 1024);
+        printf("\n  [ 총 제공: %ld MB | 사용 중: %ld MB | 남은 용량: %ld MB ]\n", max_mb, max_mb - remain_mb, remain_mb);
+    }
+}
+
 int upload_file(int sock, int user_pk, const char *filename)
 {
     struct FilePacket *pkt = (struct FilePacket *)malloc(sizeof(struct FilePacket));
@@ -263,38 +267,30 @@ int upload_file(int sock, int user_pk, const char *filename)
     long fsize = ftell(fp);
     fseek(fp, 0, SEEK_SET);
 
+    // 1. 업로드 시작 요청
     memset(pkt, 0, sizeof(*pkt));
     pkt->type = PKT_REQ_UPLOAD_START;
     pkt->user_pk = user_pk;
     pkt->file_size = fsize;
 
-    // 💡 [핵심 수정] 경로에서 순수 파일명만 추출하여 패킷에 담습니다.
-    const char *basename = strrchr(filename, '/'); // 리눅스 경로 슬래시 찾기
+    // 경로에서 순수 파일명만 추출
+    const char *basename = strrchr(filename, '/');
     if (basename)
-    {
-        basename++; // 슬래시('/') 다음 글자부터 진짜 파일명
-    }
+        basename++;
     else
-    {
-        basename = filename; // 슬래시가 없으면 전체가 파일명
-    }
-
-    // 안전하게 복사
+        basename = filename;
     strncpy(pkt->data, basename, sizeof(pkt->data) - 1);
-    pkt->data[sizeof(pkt->data) - 1] = '\0';
 
     send(sock, (char *)pkt, sizeof(*pkt), 0);
-
-    // 서버로부터 UPLOAD_START 응답 (file_pk) 받기
     if (recv_all(sock, (char *)pkt, sizeof(*pkt)) <= 0 || pkt->type != PKT_RES_UPLOAD_START)
     {
-        printf("  [Error] 업로드 시작 실패\n");
+        printf("  [Error] 업로드 시작 실패 (서버 응답 없음)\n");
         fclose(fp);
         free(pkt);
         return -1;
     }
 
-    file_pk = pkt->file_pk;
+    file_pk = pkt->file_pk; // 서버가 발급한 진짜 PK
     if (file_pk < 0)
     {
         printf("  [Error] 서버 거부 (용량 초과 또는 DB 오류)\n");
@@ -303,7 +299,7 @@ int upload_file(int sock, int user_pk, const char *filename)
         return -1;
     }
 
-    // 파일을 8KB씩 나눠서 전송
+    // 2. 8KB 조각 단위 전송
     long offset = 0;
     while (offset < fsize)
     {
@@ -312,28 +308,24 @@ int upload_file(int sock, int user_pk, const char *filename)
         pkt->user_pk = user_pk;
         pkt->file_pk = file_pk;
         pkt->offset = offset;
-
         int read_bytes = fread(pkt->data, 1, sizeof(pkt->data), fp);
         if (read_bytes <= 0)
             break;
-
         pkt->data_size = read_bytes;
         send(sock, (char *)pkt, sizeof(*pkt), 0);
         offset += read_bytes;
-
         printf("\r  [%ld / %ld bytes]", offset, fsize);
         fflush(stdout);
     }
     printf("\n");
 
-    // 업로드 완료 신호 전송
+    // 3. 전송 완료 패킷
     memset(pkt, 0, sizeof(*pkt));
     pkt->type = PKT_REQ_UPLOAD_END;
     pkt->user_pk = user_pk;
     pkt->file_pk = file_pk;
     send(sock, (char *)pkt, sizeof(*pkt), 0);
 
-    // 최종 응답 대기
     if (recv_all(sock, (char *)pkt, sizeof(*pkt)) > 0 && pkt->type == PKT_RES_UPLOAD_END && pkt->file_pk > 0)
         printf("  [Success] 업로드 완료! (PK: %d)\n", file_pk);
     else
@@ -343,38 +335,23 @@ int upload_file(int sock, int user_pk, const char *filename)
     free(pkt);
     return file_pk;
 }
+
 void request_file_list(int sock, int user_pk)
 {
     struct FilePacket pkt;
     memset(&pkt, 0, sizeof(pkt));
-    pkt.type = 40; // PKT_REQ_LIST
+    pkt.type = PKT_REQ_LIST;
     pkt.user_pk = user_pk;
-
     if (send(sock, (char *)&pkt, sizeof(pkt), 0) < 0)
         return;
 
-    printf("\n  [목록 조회 중...]\n");
-    // 헤더 출력은 루프 밖에서 한 번만
-    printf("  %-8s | %-20s | %-10s\n", "PK", "파일명", "크기(Byte)");
-    printf("  --------------------------------------------\n");
-
+    printf("\n  [목록 조회 중...]\n  %-8s | %-20s | %-10s\n  --------------------------------------------\n", "PK", "파일명", "크기(Byte)");
     while (1)
     {
-        // 서버로부터 패킷 하나를 통째로 읽음
-        if (recv_all(sock, (char *)&pkt, sizeof(pkt)) <= 0)
+        if (recv_all(sock, (char *)&pkt, sizeof(pkt)) <= 0 || pkt.type == PKT_RES_LIST_END)
             break;
-
-        // ★ 서버가 "목록 전송 끝" 신호(42)를 보내면 루프 탈출
-        if (pkt.type == 42)
-        {
-            break;
-        }
-
-        // 목록 데이터(41)인 경우에만 출력
-        if (pkt.type == 41)
-        {
+        if (pkt.type == PKT_RES_LIST)
             printf("  %s\n", pkt.data);
-        }
     }
     printf("  --------------------------------------------\n");
 }
@@ -394,7 +371,6 @@ void download_file(int sock, int user_pk, int file_pk, const char *save_path, co
         free(pkt);
         return;
     }
-
     long total = pkt->file_size, received = 0;
     if (total == 0)
     {
@@ -412,7 +388,7 @@ void download_file(int sock, int user_pk, int file_pk, const char *save_path, co
             free(pkt);
             return;
         }
-    }
+    } // 백업 경로로 시도
 
     printf("  다운로드 중 (%ld bytes)...\n", total);
     while (received < total)
@@ -436,53 +412,42 @@ void download_file(int sock, int user_pk, int file_pk, const char *save_path, co
     fclose(fp);
     free(pkt);
 }
-void request_upgrade_grade(int sock, int user_pk, const char *target_grade)
+
+void delete_file(int sock, int user_pk, int file_pk)
 {
-    // 💡 1. struct 키워드 추가 및 C언어 표준 방식(memset)으로 초기화
-    struct FilePacket req;
-    memset(&req, 0, sizeof(req));
+    struct FilePacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.type = PKT_REQ_DELETE;
+    pkt.user_pk = user_pk;
+    pkt.file_pk = file_pk;
+    printf("  [System] 서버에 파일 삭제를 요청합니다...\n");
+    send(sock, (char *)&pkt, sizeof(pkt), 0);
 
-    req.type = PKT_REQ_UPGRADE_GRADE;
-    req.user_pk = user_pk;
-
-    strncpy(req.fileName, target_grade, sizeof(req.fileName) - 1);
-
-    // 💡 2. sizeof 연산자 안에도 struct 명시
-    if (send(sock, (char *)&req, sizeof(struct FilePacket), 0) < 0)
+    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0)
     {
-        printf("  [Error] 서버로 등급 변경 요청을 보내지 못했습니다.\n");
-        return;
-    }
-
-    // 💡 3. 응답 받을 때도 struct 명시 및 초기화
-    struct FilePacket res;
-    memset(&res, 0, sizeof(res));
-
-    if (recv(sock, (char *)&res, sizeof(struct FilePacket), 0) > 0)
-    {
-        if (res.type == PKT_RES_UPGRADE_GRADE)
-        {
-            // 서버에서 성공 시 file_pk에 1을 담아 보내도록 설계했습니다.
-            if (res.file_pk == 1)
-            {
-                printf("  [System] 성공적으로 '%s'(으)로 등급이 변경되었습니다!\n", target_grade);
-                printf("  [System] 메인 메뉴의 '남은 용량 확인'에서 늘어난 용량을 확인해보세요.\n");
-            }
-            else
-            {
-                printf("  [Error] 등급 변경 실패 (DB 업데이트 오류)\n");
-            }
-        }
+        if (pkt.type == PKT_RES_DELETE && pkt.file_pk == 1)
+            printf("  [Success] 파일(PK: %d)이 삭제되었습니다. (용량 복구됨)\n", file_pk);
         else
-        {
-            printf("  [Error] 등급 변경 실패 (서버 응답 오류)\n");
-        }
+            printf("  [Error] 파일 삭제 실패.\n");
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-//  서브메뉴: 📂 파일
-// ═══════════════════════════════════════════════════════════
+void delete_folder(int sock, int user_pk)
+{
+    struct FilePacket pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.type = PKT_REQ_DELETE_FOLDER;
+    pkt.user_pk = user_pk;
+    send(sock, (char *)&pkt, sizeof(pkt), 0);
+    if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.type == PKT_RES_DELETE_FOLDER)
+    {
+        if (pkt.file_pk == 1)
+            printf("  [Success] 폴더 철거 완료.\n");
+        else
+            printf("  [Error] 삭제 거부! 폴더 안에 파일이 남아있습니다.\n");
+    }
+}
+
 void menu_file(int sock, int user_pk)
 {
     while (1)
@@ -507,12 +472,8 @@ void menu_file(int sock, int user_pk)
             continue;
         }
         FLUSH_STDIN();
-
         if (ch == 0)
-        {
-            CLEAR();
             return;
-        }
 
         CLEAR();
         if (ch == 1)
@@ -526,34 +487,35 @@ void menu_file(int sock, int user_pk)
         }
         else if (ch == 2)
         {
-            printf("  [System] 최근 파일 목록 (최대 20개)\n");
-            request_file_list(sock, user_pk); // 💡 다운로드 전 목록 출력
-
+            request_file_list(sock, user_pk);
             int fpk;
             char fname[256], spath[512];
             printf("\n  다운로드할 파일 PK (취소: 0): ");
             scanf("%d", &fpk);
             FLUSH_STDIN();
-            if (fpk == 0)
-                continue;
-
-            printf("  저장할 이름 (경로 제외): ");
-            scanf("%255s", fname);
-            FLUSH_STDIN();
-            get_default_download_path(fname, spath);
-            download_file(sock, user_pk, fpk, spath, fname);
+            if (fpk > 0)
+            {
+                printf("  저장할 이름 (경로 제외): ");
+                scanf("%255s", fname);
+                FLUSH_STDIN();
+                get_custom_download_path(fname, spath, g_download_path); // 💡 커스텀 경로 연동
+                download_file(sock, user_pk, fpk, spath, fname);
+            }
+            PAUSE();
+        }
+        else if (ch == 3)
+        {
+            request_file_list(sock, user_pk);
             PAUSE();
         }
         else if (ch == 4)
         {
-            printf("  [System] 내 파일 목록\n");
-            request_file_list(sock, user_pk); // 💡 삭제 전 목록 출력
-
+            request_file_list(sock, user_pk);
             int dpk;
             printf("\n  삭제할 파일 PK (취소: 0): ");
             scanf("%d", &dpk);
             FLUSH_STDIN();
-            if (dpk != 0)
+            if (dpk > 0)
                 delete_file(sock, user_pk, dpk);
             PAUSE();
         }
@@ -563,67 +525,181 @@ void menu_file(int sock, int user_pk)
             PAUSE();
         }
         else
+            PAUSE();
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  [5] 🚫 블랙리스트 관리 메뉴 (유저 간 메시지 차단)
+// ═══════════════════════════════════════════════════════════
+void menu_blacklist(int sock, int user_pk)
+{
+    while (1)
+    {
+        CLEAR();
+        printf("  ╔══════════════════════════════════╗\n");
+        printf("  ║     🚫  블랙리스트 관리          ║\n");
+        printf("  ╠══════════════════════════════════╣\n");
+        printf("  ║  1. 유저 차단 추가               ║\n");
+        printf("  ║  2. 차단 해제                    ║\n");
+        printf("  ║  3. 차단 목록 보기               ║\n");
+        printf("  ║  0. 돌아가기                     ║\n");
+        printf("  ╚══════════════════════════════════╝\n");
+        printf("  선택: ");
+
+        int ch;
+        if (scanf("%d", &ch) != 1)
         {
-            printf("  [Error] 0~5 중 선택하세요.\n");
+            FLUSH_STDIN();
+            continue;
+        }
+        FLUSH_STDIN();
+        if (ch == 0)
+            return;
+
+        CLEAR();
+        if (ch == 1)
+        {
+            char target_email[128] = {0};
+            printf("  차단할 상대방 이메일: ");
+            scanf("%127s", target_email);
+            FLUSH_STDIN();
+
+            struct BlacklistReqPacket req = {500, user_pk, 0, ""};
+            strncpy(req.target_email, target_email, 127);
+            send(sock, (char *)&req, sizeof(req), 0);
+
+            struct BlacklistResPacket res;
+            memset(&res, 0, sizeof(res));
+            if (recv_all(sock, (char *)&res, sizeof(res)) > 0)
+            {
+                if (res.result_code == 1)
+                    printf("  [Success] '%s' 차단 완료!\n", target_email);
+                else if (res.result_code == 0)
+                    printf("  [Error] 존재하지 않는 이메일입니다.\n");
+                else if (res.result_code == -1)
+                    printf("  [Error] 자기 자신을 차단할 수 없습니다.\n");
+                else if (res.result_code == -2)
+                    printf("  [Error] 이미 차단된 사용자입니다.\n");
+                else
+                    printf("  [Error] 서버 오류 발생\n");
+            }
+            PAUSE();
+        }
+        else if (ch == 2 || ch == 3)
+        {
+            struct BlacklistReqPacket req = {504, user_pk, 0, ""};
+            send(sock, (char *)&req, sizeof(req), 0);
+
+            printf("  %-6s | %-30s | %-16s\n", "번호", "이메일", "차단일시");
+            printf("  ----------------------------------------------------------\n");
+            int has_item = 0;
+            while (1)
+            {
+                struct BlacklistResPacket res;
+                if (recv_all(sock, (char *)&res, sizeof(res)) <= 0 || res.type == 506)
+                    break;
+                if (res.type == 505)
+                {
+                    printf("  %-6d | %-30s | %-16s\n", res.blacklist_num, res.target_email, res.created_at);
+                    has_item = 1;
+                }
+            }
+            printf("  ----------------------------------------------------------\n");
+
+            if (ch == 2 && has_item)
+            {
+                printf("  해제할 번호 (취소: 0): ");
+                int b_num;
+                scanf("%d", &b_num);
+                FLUSH_STDIN();
+                if (b_num > 0)
+                {
+                    struct BlacklistReqPacket d_req = {502, user_pk, b_num, ""};
+                    send(sock, (char *)&d_req, sizeof(d_req), 0);
+                    struct BlacklistResPacket d_res;
+                    if (recv_all(sock, (char *)&d_res, sizeof(d_res)) > 0 && d_res.result_code == 1)
+                        printf("  [Success] 차단 해제 완료!\n");
+                    else
+                        printf("  [Error] 해제 실패\n");
+                }
+            }
+            else if (!has_item)
+            {
+                printf("  차단된 사용자가 없습니다.\n");
+            }
             PAUSE();
         }
     }
 }
 
-void request_user_settings(int sock, int user_pk, int type, const char* new_data)
+// ═══════════════════════════════════════════════════════════
+//  [6] ⚙️ 개인 설정 메뉴
+// ═══════════════════════════════════════════════════════════
+
+void request_user_settings(int sock, int user_pk, int type, const char *new_data)
 {
     struct UserSettingsPacket pkt;
     memset(&pkt, 0, sizeof(pkt));
-
     pkt.type = PKT_REQ_USER_SETTINGS;
     pkt.user_pk = user_pk;
-    pkt.setting_type = type; // 1: 이름, 2: 비밀번호, 3: 이메일
+    pkt.setting_type = type;
     strncpy(pkt.new_data, new_data, sizeof(pkt.new_data) - 1);
-
-    if (send(sock, (char*)&pkt, sizeof(pkt), 0) <= 0)
-    {
-        printf("  [Error] 서버 전송 실패\n");
+    if (send(sock, (char *)&pkt, sizeof(pkt), 0) <= 0)
         return;
-    }
 
-    // 결과 수신 (FilePacket 구조체로 결과 판단)
     struct FilePacket res;
     memset(&res, 0, sizeof(res));
-    if (recv_all(sock, (char*)&res, sizeof(res)) > 0)
+    if (recv_all(sock, (char *)&res, sizeof(res)) > 0)
     {
-        if (res.file_pk == 1){
+        if (res.file_pk == 1)
             printf("  [Success] 변경 사항이 서버에 반영되었습니다.\n");
-        } else {
-            printf("  [Error] 변경 실패 (현재 정보가 틀렸거나 중복된 데이터입니다.)\n");
-        }
+        else
+            printf("  [Error] 변경 실패\n");
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-//  서브메뉴: ⚙️ 설정
-// ═══════════════════════════════════════════════════════════
+void request_upgrade_grade(int sock, int user_pk, const char *target_grade)
+{
+    struct FilePacket req;
+    memset(&req, 0, sizeof(req));
+    req.type = PKT_REQ_UPGRADE_GRADE;
+    req.user_pk = user_pk;
+    strncpy(req.fileName, target_grade, sizeof(req.fileName) - 1);
+    if (send(sock, (char *)&req, sizeof(struct FilePacket), 0) < 0)
+        return;
+
+    struct FilePacket res;
+    memset(&res, 0, sizeof(res));
+    if (recv(sock, (char *)&res, sizeof(struct FilePacket), 0) > 0)
+    {
+        if (res.type == PKT_RES_UPGRADE_GRADE && res.file_pk == 1)
+            printf("  [System] 성공적으로 '%s'(으)로 등급 변경!\n", target_grade);
+        else
+            printf("  [Error] 등급 변경 실패\n");
+    }
+}
+
 void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
 {
-    (void)sock;
-    (void)user_pk;
     while (1)
     {
         CLEAR();
         printf("  ╔══════════════════════════════════╗\n");
-        printf("  ║     ⚙️   설정 (Settings)          ║\n");
+        printf("  ║     ⚙️   설정 (Settings)         ║\n");
         printf("  ╠══════════════════════════════════╣\n");
-        printf("  ║  1. 개인 설정                    ║\n");
+        printf("  ║  1. 개인 설정 (이름/비번/경로)   ║\n");
         printf("  ║  2. 메시지 설정 (미구현)         ║\n");
         printf("  ║  3. 등급 설정 (용량 확장)        ║\n");
         printf("  ║  4. 내 폴더 삭제 (계정 탈퇴)     ║\n");
         printf("  ║  5. 로그아웃                     ║\n");
         printf("  ║  0. 돌아가기                     ║\n");
         printf("  ╚══════════════════════════════════╝\n");
-        printf("  (%s)\n", email);
-        printf("  선택: ");
+        printf("  (%s)\n  현재 다운로드 경로: %s\n  선택: ", email, (strlen(g_download_path) > 0 ? g_download_path : "기본값(Downloads)"));
 
         int ch;
-        scanf("%d",&ch);
+        scanf("%d", &ch);
+        FLUSH_STDIN();
         if (ch == 1)
         {
             CLEAR();
@@ -633,191 +709,187 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
             printf("  ║  1. 이름 변경                    ║\n");
             printf("  ║  2. 비밀번호 변경                ║\n");
             printf("  ║  3. 이메일(ID) 변경              ║\n");
+            printf("  ║  4. 다운로드 경로 변경           ║\n");
             printf("  ║  0. 취소                         ║\n");
-            printf("  ╚══════════════════════════════════╝\n");
-            printf("  선택: ");
-
+            printf("  ╚══════════════════════════════════╝\n  선택: ");
             int sub_ch;
             if (scanf("%d", &sub_ch) == 1)
             {
                 FLUSH_STDIN();
                 char input_data[131] = {0};
-
                 if (sub_ch == 1)
                 {
-                    printf("  새로운 이름 입력: ");
+                    printf("  새 이름: ");
                     scanf("%64s", input_data);
                     FLUSH_STDIN();
                     request_user_settings(sock, user_pk, 1, input_data);
                 }
                 else if (sub_ch == 2)
                 {
-                    char current_pw[32], new_pw[32];
-                    char current_hash[65], new_hash[65];
-                    char combined_data[131]; // 두 해시를 하나로 묶어 보낼 버퍼
-
-                    input_password("  현재 비밀번호 입력: ", current_pw, 32);
-                    hash_password(current_pw, current_hash);
-
-                    do {
-                        input_password("  새로운 비밀번호 입력 (영문+숫자 혼합 5~15자): ", new_pw, 32);
+                    char cur_pw[32], new_pw[32], cur_h[65], new_h[65], comb[131];
+                    input_password("  현재 비밀번호: ", cur_pw, 32);
+                    hash_password(cur_pw, cur_h);
+                    do
+                    {
+                        input_password("  새 비밀번호 (영문+숫자 5~15자): ", new_pw, 32);
                     } while (!validate_password(new_pw));
-                    hash_password(new_pw, new_hash);
-
-                    // 💡 [팁] 패킷의 new_data 필드(65자)에 두 데이터를 다 담기 어려우므로,
-                    // 두 해시를 구분자(예: '|')로 합쳐서 보내거나
-                    // 구조체를 확장하는 대신, 간단하게 두 번 연속 물어보는 로직으로 처리합니다.
-
-                    // 현재는 편의상 64자 해시 두 개를 붙여서 서버로 보낸다고 가정 (서버에서 쪼개기)
-                    sprintf(combined_data, "%s|%s", current_hash, new_hash);
-                    request_user_settings(sock, user_pk, 2, combined_data);
-                    // request_user_settings(sock, user_pk, 2, input_data);
+                    hash_password(new_pw, new_h);
+                    sprintf(comb, "%s|%s", cur_h, new_h);
+                    request_user_settings(sock, user_pk, 2, comb);
                 }
                 else if (sub_ch == 3)
                 {
                     char new_email[64] = {0};
-                    printf("  [System] 새로운 이메일로 인증을 진행합니다.\n");
-
-                    // 💡 [핵심] 기존에 만들어둔 회원가입용 이메일 인증 함수를 재사용!
                     if (handle_email_auth(sock, new_email))
                     {
-                        // 인증(및 중복검사)에 통과했을 때만 서버에 변경 요청을 보냄
                         request_user_settings(sock, user_pk, 3, new_email);
-
-                        // 💡 [UX/보안 고려] 로그인 ID가 바뀌었으므로 로그아웃 시키는 것이 안전합니다.
-                        printf("  [System] 이메일(ID)이 변경되었습니다. 새 이메일로 다시 로그인해주세요.\n");
                         *should_logout = 1;
-                        return; // 메뉴 루프 탈출
-                    }
-                    else
-                    {
-                        printf("  [System] 인증에 실패하여 이메일 변경이 취소되었습니다.\n");
+                        return;
                     }
                 }
-                else if (sub_ch == 0)
+                else if (sub_ch == 4)
                 {
-                    printf("  [System] 취소했습니다.\n");
+                    printf("  새 다운로드 절대경로 (예:/home/user/dl): ");
+                    scanf("%130s", input_data);
+                    FLUSH_STDIN();
+                    request_user_settings(sock, user_pk, 4, input_data);
+                    strncpy(g_download_path, input_data, sizeof(g_download_path) - 1); // 변수 동기화
                 }
             }
-            else
-            {
-                printf("  [Error] 0~3 중 선택하세요.\n");
-                FLUSH_STDIN();
-            }
             PAUSE();
         }
-        else if (ch == 2)
-        {
-            printf("  [System] 메시지 설정은 준비 중입니다.\n");
-            PAUSE();
-            FLUSH_STDIN();
-        }
-        // CLEAR();
-        // // 💡 기존 3번(등급 설정)을 준비 중 목록에서 제외했습니다.
-        // if (ch == 1 || ch == 2)
-        // {
-        //     printf("  [System] 해당 기능은 준비 중입니다.\n");
-        //     PAUSE();
-        // }
-        else if (ch == 3) // 💡 3번 등급 설정 로직 추가
+        else if (ch == 3)
         {
             CLEAR();
-            printf("  ╔══════════════════════════════════╗\n");
-            printf("  ║       등급 설정 (Storage)        ║\n");
-            printf("  ╠══════════════════════════════════╣\n");
-            printf("  ║  1. 일반     (100MB)             ║\n");
-            printf("  ║  2. 비지니스 (200MB)             ║\n");
-            printf("  ║  3. VIP      (500MB)             ║\n");
-            printf("  ║  4. VVIP     (1GB)               ║\n");
-            printf("  ║  0. 취소                         ║\n");
-            printf("  ╚══════════════════════════════════╝\n");
-            printf("  변경할 등급 선택: ");
-
-            int grade_ch;
-            if (scanf("%d", &grade_ch) == 1)
+            printf("  1. 일반(100MB)  2. 비지니스(200MB)  3. VIP(500MB)  4. VVIP(1GB)  0. 취소\n  선택: ");
+            int g_ch;
+            if (scanf("%d", &g_ch) == 1)
             {
                 FLUSH_STDIN();
-                char target_grade[32] = "";
-
-                if (grade_ch == 1)
-                    strcpy(target_grade, "일반");
-                else if (grade_ch == 2)
-                    strcpy(target_grade, "비지니스");
-                else if (grade_ch == 3)
-                    strcpy(target_grade, "VIP");
-                else if (grade_ch == 4)
-                    strcpy(target_grade, "VVIP");
-                else if (grade_ch == 0)
-                {
-                    printf("  [System] 등급 변경을 취소합니다.\n");
-                }
-                else
-                {
-                    printf("  [Error] 올바른 번호를 선택해주세요.\n");
-                }
-
-                // 올바른 등급을 선택했을 경우 서버로 변경 요청
-                if (grade_ch >= 1 && grade_ch <= 4)
-                {
-                    // 💡 서버에 등급 변경 패킷을 보내는 함수 호출
-                    request_upgrade_grade(sock, user_pk, target_grade);
-                }
-            }
-            else
-            {
-                FLUSH_STDIN();
-                printf("  [Error] 숫자를 입력해주세요.\n");
+                const char *gr[] = {"", "일반", "비지니스", "VIP", "VVIP"};
+                if (g_ch >= 1 && g_ch <= 4)
+                    request_upgrade_grade(sock, user_pk, gr[g_ch]);
             }
             PAUSE();
         }
         else if (ch == 4)
         {
-            printf("  [경고] 빈 폴더만 철거 가능합니다. 지우시겠습니까? (1:예): ");
             int confirm;
+            printf("  [경고] 지우시겠습니까? (1:예): ");
             if (scanf("%d", &confirm) == 1 && confirm == 1)
             {
                 FLUSH_STDIN();
                 delete_folder(sock, user_pk);
             }
-            else
-            {
-                FLUSH_STDIN();
-            }
             PAUSE();
         }
         else if (ch == 5)
         {
-            printf("  [System] 로그아웃 합니다.\n");
             *should_logout = 1;
             return;
         }
         else if (ch == 0)
-        {
-            CLEAR();
             return;
-        }
-        else
-        {
-            printf("  [Error] 0~5 중 선택하세요.\n");
-            PAUSE();
-        }
     }
 }
 
 // ═══════════════════════════════════════════════════════════
-//  허브 메뉴 — 로그인 후 모든 기능의 진입점
-//  메시지/파일/설정 으로 완전히 분기 → 번호 충돌 없음
+//  [7] 👑 최고 관리자 (PK: 1) 전용 메뉴
+// ═══════════════════════════════════════════════════════════
+bool check_admin(int user_pk) { return user_pk == 1; }
+
+void request_admin_action(int sock, int admin_pk, int target_pk, int type, const char *message)
+{
+    AdminPacket pkt = {0};
+    pkt.type = type;
+    pkt.admin_pk = admin_pk;
+    pkt.target_pk = target_pk;
+    if (message != NULL)
+        strncpy(pkt.data, message, sizeof(pkt.data) - 1);
+    if (send(sock, (char *)&pkt, sizeof(AdminPacket), 0) <= 0)
+        return;
+
+    if (type == PKT_REQ_ADMIN_STATUS)
+    {
+        AdminPacket res = {0};
+        if (recv_all(sock, (char *)&res, sizeof(AdminPacket)) > 0 && res.type == PKT_RES_ADMIN_STATUS)
+        {
+            long long used_bytes = 0, remain_bytes = 0;
+            sscanf(res.data, "%lld|%lld", &used_bytes, &remain_bytes);
+            printf("\n  [ ☁️ CLOUD SERVER STATUS ]\n");
+            printf("  ▶ 현재 접속자 : %d 명\n", res.target_pk);
+            printf("  ▶ 남은 용량   : %lld MB\n", remain_bytes / (1024 * 1024));
+            printf("  --------------------------------------\n");
+        }
+    }
+    else
+    {
+        printf("  [System] 서버로 관리자 명령이 전달되었습니다.\n");
+    }
+}
+
+void admin_menu(int sock, int admin_pk)
+{
+    if (admin_pk != 1)
+        return;
+    int choice;
+    while (1)
+    {
+        CLEAR();
+        printf("  ===== 👑 MASTER ADMIN CONSOLE (PK: %d) =====\n", admin_pk);
+        request_admin_action(sock, admin_pk, 0, PKT_REQ_ADMIN_STATUS, NULL);
+        printf("\n  1. 전체 공지 발송 (DB 저장)\n  2. 강력 블랙리스트 (IP+PK 차단)\n  3. 시스템 전체 초기화\n  0. 나가기\n  선택: ");
+        if (scanf("%d", &choice) != 1)
+        {
+            FLUSH_STDIN();
+            continue;
+        }
+        FLUSH_STDIN();
+
+        if (choice == 0)
+            break;
+        if (choice == 1)
+        {
+            char notice[256];
+            printf("  공지 내용: ");
+            fgets(notice, sizeof(notice), stdin);
+            notice[strcspn(notice, "\n")] = 0;
+            request_admin_action(sock, admin_pk, 0, PKT_REQ_ADMIN_NOTICE, notice);
+        }
+        else if (choice == 2)
+        {
+            int target;
+            char ip[64] = "0.0.0.0";
+            printf("  차단 PK: ");
+            scanf("%d", &target);
+            FLUSH_STDIN();
+            printf("  차단 IP: ");
+            scanf("%63s", ip);
+            FLUSH_STDIN();
+            request_admin_action(sock, admin_pk, target, PKT_REQ_ADMIN_BAN, ip);
+        }
+        else if (choice == 3)
+        {
+            char pw[65], hpw[65];
+            input_password("  [위험] 관리자 비밀번호 입력: ", pw, 32);
+            hash_password(pw, hpw);
+            request_admin_action(sock, admin_pk, 0, PKT_REQ_ADMIN_RESET, hpw);
+        }
+        PAUSE();
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  [8] 메인 허브 메뉴 및 메인 루프
 // ═══════════════════════════════════════════════════════════
 void menu_hub(int sock, int user_pk, const char *email)
 {
     while (1)
     {
         CLEAR();
-        int unread = msg_get_unread();
-
+        int unread = msg_get_unread(); // msg_client.h에서 제공
         printf("  ==================================================\n");
-        printf("  ☁️  OUR CLOUD SERVER\n");
-        printf("  Logged in: %s\n", email);
+        printf("  ☁️  OUR CLOUD SERVER (Logged in: %s)\n", email);
         printf("  ==================================================\n");
         if (unread > 0)
             printf("  [Status] 📧 새 메시지: %d개\n", unread);
@@ -825,14 +897,11 @@ void menu_hub(int sock, int user_pk, const char *email)
             printf("  [Status] 📧 새 메시지 없음\n");
         printf("  --------------------------------------------------\n\n");
         printf("  1. 📧  메시지 (Message)\n");
-        printf("         보내기, 확인, 삭제\n\n");
         printf("  2. 📂  파일 (File)\n");
-        printf("         저장(Upload), 불러오기(Download), 삭제\n\n");
         printf("  3. ⚙️   설정 (Settings)\n");
-        printf("         개인/메시지/파일 설정, 로그아웃\n\n");
-        printf("  4. ❌  나가기 (Exit)\n\n");
-        printf("  --------------------------------------------------\n");
-        printf("  선택: ");
+        printf("  4. 🚫  블랙리스트 (Blacklist)\n");
+        printf("  5. ❌  나가기 (Exit)\n\n");
+        printf("  --------------------------------------------------\n  선택: ");
 
         int ch;
         if (scanf("%d", &ch) != 1)
@@ -840,183 +909,40 @@ void menu_hub(int sock, int user_pk, const char *email)
             FLUSH_STDIN();
             continue;
         }
-        FLUSH_STDIN(); // ← 버퍼 완전 비우기 → 서브메뉴 오입력 원천 차단
+        FLUSH_STDIN();
 
         if (ch == 1)
         {
-            msg_run_menu(); // MsgClientLogic.hpp → menu_message() 호출
+            msg_run_menu();
             CLEAR();
-        }
+        } // 메시지 서버용 UI 호출
         else if (ch == 2)
-        {
             menu_file(sock, user_pk);
-        }
         else if (ch == 3)
         {
             int logout = 0;
             menu_settings(sock, user_pk, email, &logout);
             if (logout)
             {
-                CLEAR();
-                printf("  [System] 로그아웃 완료. 안녕히 가세요!\n\n");
                 msg_cleanup();
                 return;
             }
         }
         else if (ch == 4)
+            menu_blacklist(sock, user_pk);
+        else if (ch == 5)
         {
-            CLEAR();
-            printf("  [System] 프로그램을 종료합니다. 안녕히 가세요!\n\n");
             msg_cleanup();
             return;
         }
-        else
-        {
-            printf("  [Error] 1~4 중 선택하세요.\n");
-            PAUSE();
-        }
     }
 }
 
-// 관리자 확인 함수
-bool check_admin(int user_pk)
-{
-    // 오직 PK 1번(최초 가입자)만 최고 관리자로 인정합니다.
-    if(user_pk == 1) 
-        return true;
-    
-    return false;
-}
-
-// 관리자 요청 전송 및 응답 처리 함수 (서버 상태 수신 기능 추가됨)
-void request_admin_action(int sock, int admin_pk, int target_pk, int type, const char* message) {
-    AdminPacket pkt = {0};
-    pkt.type = type;
-    pkt.admin_pk = admin_pk; // 관리자 권한 검증용 (PK 1)
-    pkt.target_pk = target_pk;
-    
-    if (message != NULL) {
-        strncpy(pkt.data, message, sizeof(pkt.data) - 1);
-    }
-
-    if (send(sock, (char*)&pkt, sizeof(AdminPacket), 0) <= 0) {
-        printf("  [Error] 서버로 요청을 보내지 못했습니다.\n");
-        return;
-    }
-
-    // 💡 [추가됨] 서버 상태 조회(STATUS) 요청인 경우, 응답을 받아와서 화면에 출력합니다.
-    if (type == PKT_REQ_ADMIN_STATUS) {
-        AdminPacket res = {0};
-        if (recv_all(sock, (char*)&res, sizeof(AdminPacket)) > 0 && res.type == PKT_RES_ADMIN_STATUS) {
-            long long used_bytes = 0, remain_bytes = 0;
-            // 서버에서 보낸 "%lld|%lld" 파싱
-            sscanf(res.data, "%lld|%lld", &used_bytes, &remain_bytes);
-            
-            int current_users = res.target_pk; 
-
-            printf("\n  [ ☁️ CLOUD SERVER STATUS ]\n");
-            printf("  ▶ 현재 접속자 : %d 명\n", current_users);
-            printf("  ▶ 총 제공 용량: 1000 GB\n");
-            printf("  ▶ 사용 중     : %lld MB\n", used_bytes / (1024 * 1024));
-            printf("  ▶ 남은 용량   : %lld MB\n", remain_bytes / (1024 * 1024));
-            printf("  --------------------------------------\n");
-        }
-    } else {
-        printf("  [System] 관리자 명령이 서버로 전달되었습니다.\n");
-    }
-}
-
-// 관리자 전용 메뉴 (UI 대폭 개편 및 기능 연동)
-void admin_menu(int sock, int admin_pk) 
-{
-    // 혹시 모를 이중 보안 방어 (PK 1번만 접근 가능)
-    if (admin_pk != 1) {
-        printf("  [경고] 접근 권한이 없습니다. (최고 관리자 전용)\n");
-        return;
-    }
-
-    int choice;
-    while (1) 
-    {
-        CLEAR();
-        printf("  ===== 👑 MASTER ADMIN CONSOLE (PK: %d) =====\n", admin_pk);
-        
-        // 💡 [추가됨] 메뉴를 그릴 때마다 서버에 최신 상태를 요청해서 뿌려줌
-        request_admin_action(sock, admin_pk, 0, PKT_REQ_ADMIN_STATUS, NULL);
-
-        printf("\n  1. 전체 공지사항 발송\n");
-        printf("  2. 강력 블랙리스트 등록 (IP + PK 동시 차단)\n");
-        printf("  3. 시스템 전체 초기화 (데이터 소멸)\n");
-        printf("  0. 일반 메뉴로 돌아가기\n");
-        printf("  선택: ");
-        
-        if (scanf("%d", &choice) != 1) 
-        {
-            FLUSH_STDIN();
-            continue;
-        }
-        FLUSH_STDIN();
-
-        if (choice == 0) break;
-
-        if (choice == 1) 
-        {
-            char notice[256];
-            printf("  [공지] 발송할 메시지: ");
-            fgets(notice, sizeof(notice), stdin);
-            notice[strcspn(notice, "\n")] = 0; // 개행 제거
-            
-            request_admin_action(sock, admin_pk, 0, PKT_REQ_ADMIN_NOTICE, notice);
-        }
-        else if (choice == 2) 
-        {
-            int target;
-            char target_ip[64];
-            printf("  [차단] 차단할 유저의 PK: ");
-            scanf("%d", &target);
-            FLUSH_STDIN();
-            
-            printf("  [차단] 차단할 유저의 IP (모르면 0.0.0.0 입력): ");
-            scanf("%63s", target_ip);
-            FLUSH_STDIN();
-
-            // IP 정보를 message 매개변수에 실어서 보냅니다.
-            request_admin_action(sock, admin_pk, target, PKT_REQ_ADMIN_BAN, target_ip);
-        }
-        else if (choice == 3) 
-        {
-            char pw[65];
-            printf("\n  [🚨 위험] 정말로 클라우드 데이터를 초기화하시겠습니까?\n");
-            
-            // 💡 [핵심] 태현님이 추가하신 비밀번호 숨김 함수를 여기에 바로 활용!
-            input_password("  본인 확인을 위해 관리자(PK:1) 비밀번호를 입력하세요: ", pw, 32);
-
-            // 해싱 처리
-            char hashed_pw[65];
-            hash_password(pw, hashed_pw);
-
-            // 해싱된 암호를 서버로 전송
-            request_admin_action(sock, admin_pk, 0, PKT_REQ_ADMIN_RESET, hashed_pw);
-        }
-        else {
-            printf("  [Error] 잘못된 선택입니다.\n");
-        }
-        PAUSE();
-    }
-}
-
-// ═══════════════════════════════════════════════════════════
-//  main
-// ═══════════════════════════════════════════════════════════
 int main(int argc, char *argv[])
 {
-    // 실행 시 인자로 IP 지정 가능: ./client 10.10.20.101
-    // 없으면 DBConfig.hpp의 SERVER_IP 사용
-    const char *target_ip = (argc >= 2) ? argv[1] : SERVER_IP;
+    const char *target_ip = (argc >= 2) ? argv[1] : "127.0.0.1";
     int sock = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in addr = {0};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(9000);
+    struct sockaddr_in addr = {AF_INET, htons(9000)};
     inet_pton(AF_INET, target_ip, &addr.sin_addr);
 
     if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
@@ -1024,19 +950,13 @@ int main(int argc, char *argv[])
         perror("[Error] 서버 연결 실패");
         return -1;
     }
-    struct ServerHandshakeHeader hand;
-    recv_all(sock, (char*)&hand, sizeof(hand)); 
-    printf("  [System] 서버 버전: %.1f, 현재 접속자: %d/%d\n", 
-    hand.server_version, hand.current_users, hand.max_users);
 
-    CLEAR();
-    printf("  [System] 서버(%s) 접속 성공!\n\n", target_ip);
+    struct ServerHandshakeHeader hand;
+    recv_all(sock, (char *)&hand, sizeof(hand));
 
     int user_pk = -1;
-    char email[64] = {0};
-    char pw[32] = {0};
+    char email[64] = {0}, pw[32] = {0};
 
-    // ── 인증 루프 ────────────────────────────────────────────
     while (user_pk <= 0)
     {
         CLEAR();
@@ -1046,9 +966,7 @@ int main(int argc, char *argv[])
         printf("  ║  1. 로그인                       ║\n");
         printf("  ║  2. 회원가입                     ║\n");
         printf("  ║  0. 종료                         ║\n");
-        printf("  ╚══════════════════════════════════╝\n");
-        printf("  선택: ");
-
+        printf("  ╚══════════════════════════════════╝\n  선택: ");
         int choice;
         if (scanf("%d", &choice) != 1)
         {
@@ -1057,79 +975,64 @@ int main(int argc, char *argv[])
         }
         FLUSH_STDIN();
 
-        CLEAR();
         if (choice == 0)
         {
             close(sock);
             return 0;
         }
-
         if (choice == 2)
         {
             printf("  ── 회원가입 ──────────────────────────\n");
             if (handle_email_auth(sock, email))
             {
-                char username[10] = {0};
+                char name[10];
                 printf("  이름: ");
-                scanf("%9s", username);
+                scanf("%9s", name);
                 FLUSH_STDIN();
-                do {
-                    input_password("  비밀번호 (영문+숫자 혼합 5~15자): ", pw, 32);
+                do
+                {
+                    input_password("  비번 (영문+숫자 5~15자): ", pw, 32);
                 } while (!validate_password(pw));
-                int pk = request_auth(sock, PKT_REQ_REGISTER, email, pw, username);
-                if (pk > 0)
-                {
-                    user_pk = pk;
+                user_pk = request_auth(sock, PKT_REQ_REGISTER, email, pw, name);
+                if (user_pk > 0)
                     printf("  [Success] 가입 성공! (ID: %d)\n", user_pk);
-                }
-                else
-                {
-                    printf("  [Error] 이미 가입된 이메일이거나 서버 오류\n");
-                }
             }
             PAUSE();
         }
         else if (choice == 1)
         {
-            printf("  ── 로그인 ────────────────────────────\n");
-            printf("  이메일: ");
+            printf("  ── 로그인 ────────────────────────────\n  이메일: ");
             scanf("%63s", email);
             FLUSH_STDIN();
-            input_password("  비밀번호: ", pw, 32);
+            input_password("  비번: ", pw, 32);
             user_pk = request_auth(sock, PKT_REQ_LOGIN, email, pw, "");
+
             if (user_pk > 0)
             {
                 printf("  [Success] 로그인 성공!\n");
                 if (check_admin(user_pk))
                 {
-                    printf("  [System] 관리자 계정으로 인식되었습니다.\n");
-                    printf("  관리자 메뉴를 여시겠습니까? (1: Yes / 0: No): ");
-                    int go_admin;
-                    scanf("%d", &go_admin);
+                    printf("  [System] 최고 관리자입니다. 관리자 메뉴? (1:Yes/0:No): ");
+                    int g;
+                    scanf("%d", &g);
                     FLUSH_STDIN();
-                    if (go_admin == 1)
-                    {
+                    if (g == 1)
                         admin_menu(sock, user_pk);
-                    }
                 }
             }
             else
             {
-                printf("  [Error] 이메일 또는 비밀번호가 틀렸습니다.\n");
+                printf("  [Error] 이메일/비밀번호 오류 또는 차단됨\n");
                 user_pk = -1;
             }
             PAUSE();
         }
     }
 
-    // ── 메시지 서버 연결 ─────────────────────────────────────
-    CLEAR();
-    if (msg_init(user_pk, email) == 0) // 💡 email 인자 추가
-        printf("  [System] 메시지 서버 연결 성공!\n");
-    else
-        printf("  [System] 메시지 서버 연결 실패 (메시지 기능 비활성화)\n");
+    // 9001번 메시지 서버 백그라운드 연결
+    msg_init(user_pk, email);
 
-    // ── 허브 메뉴 진입 ───────────────────────────────────────
+    // 메인 시스템 진입
     menu_hub(sock, user_pk, email);
 
     close(sock);

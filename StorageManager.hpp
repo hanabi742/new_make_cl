@@ -370,34 +370,42 @@ public:
     bool deleteUserFolder(int user_pk)
     {
         std::lock_guard<std::recursive_mutex> lock(db_mtx);
-        if (!conn) return false;
+        if (!conn)
+            return false;
         checkConnection();
 
         char query[256];
         snprintf(query, sizeof(query), "SELECT COUNT(*) FROM FILE_PATH WHERE USER_NUM = %d", user_pk);
-        if (mysql_query(conn, query)) return false;
+        if (mysql_query(conn, query))
+            return false;
 
         MYSQL_RES *res = mysql_store_result(conn);
-        if (!res) return false;
+        if (!res)
+            return false;
 
         MYSQL_ROW row = mysql_fetch_row(res);
         int file_count = (row && row[0]) ? atoi(row[0]) : 0;
         mysql_free_result(res);
 
         // 파일이 남아있으면 삭제 불가
-        if (file_count > 0) return false;
+        if (file_count > 0)
+            return false;
 
         // 물리적 폴더 철거
         std::lock_guard<std::mutex> fs_lock(mtx);
-        try 
+        try
         {
             fs::path s_path = server_root / std::to_string(user_pk);
             fs::path u_path = uploading_root / std::to_string(user_pk);
-            if (fs::exists(s_path)) fs::remove_all(s_path);
-            if (fs::exists(u_path)) fs::remove_all(u_path);
+            if (fs::exists(s_path))
+                fs::remove_all(s_path);
+            if (fs::exists(u_path))
+                fs::remove_all(u_path);
             return true;
-        } 
-        catch (...) 
-        { return false; }
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 };
