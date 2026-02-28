@@ -244,11 +244,15 @@ void check_storage_quota(int sock, int user_pk)
     pkt.type = PKT_REQ_STORAGE_INFO;
     pkt.user_pk = user_pk;
     send(sock, (char *)&pkt, sizeof(pkt), 0);
+
     if (recv_all(sock, (char *)&pkt, sizeof(pkt)) > 0 && pkt.type == PKT_RES_STORAGE_INFO)
     {
-        long max_mb = pkt.file_size / (1024 * 1024);
-        long remain_mb = pkt.offset / (1024 * 1024);
-        printf("\n  [ 총 제공: %ld MB | 사용 중: %ld MB | 남은 용량: %ld MB ]\n", max_mb, max_mb - remain_mb, remain_mb);
+        // [수정] long long 타입으로 캐스팅하고 %lld 포맷을 사용하여 대용량 안전성 확보
+        long long max_mb = (long long)pkt.file_size / (1024 * 1024);
+        long long remain_mb = (long long)pkt.offset / (1024 * 1024);
+
+        printf("\n  [ ☁️ 총 제공: %lld MB | 사용 중: %lld MB | 남은 용량: %lld MB ]\n",
+               max_mb, max_mb - remain_mb, remain_mb);
     }
 }
 
@@ -770,7 +774,14 @@ void menu_settings(int sock, int user_pk, const char *email, int *should_logout)
                 FLUSH_STDIN();
                 const char *gr[] = {"", "일반", "비지니스", "VIP", "VVIP"};
                 if (g_ch >= 1 && g_ch <= 4)
+                {
+                    // 1. 서버에 등급 업그레이드 요청
                     request_upgrade_grade(sock, user_pk, gr[g_ch]);
+
+                    // 2. [추가] 업그레이드 직후 최신 남은 용량을 서버에서 다시 받아와 화면에 출력!
+                    printf("\n  [System] 최신 용량 정보를 동기화합니다...\n");
+                    check_storage_quota(sock, user_pk);
+                }
             }
             PAUSE();
         }
