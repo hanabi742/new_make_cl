@@ -254,7 +254,7 @@ private:
         curl_easy_setopt(curl, CURLOPT_READFUNCTION, payload_source);
         curl_easy_setopt(curl, CURLOPT_READDATA, &upload_data);
         curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
-
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
         CURLcode res = curl_easy_perform(curl);
         curl_slist_free_all(recipients);
         curl_easy_cleanup(curl);

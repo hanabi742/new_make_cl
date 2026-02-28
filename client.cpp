@@ -217,9 +217,11 @@ int request_auth(int sock, int type, const char *id, const char *plain_pwd, cons
     hash_password(plain_pwd, req.pwd_hash);
     if (name)
         strncpy(req.name, name, sizeof(req.name) - 1);
+
     send(sock, (char *)&req, sizeof(req), 0);
 
     struct AuthResponse res;
+    // 💡 sizeof(res)를 사용하여 Protocol.hpp에 정의된 141바이트 전체를 다 읽어야 합니다.
     if (recv_all(sock, (char *)&res, sizeof(res)) <= 0)
         return -1;
 

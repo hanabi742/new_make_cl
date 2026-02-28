@@ -96,11 +96,13 @@ int main()
             while (true)
             {
                 int16_t packet_type;
-                int peek_len = recv(client_sock, (char *)&packet_type, sizeof(int16_t), MSG_PEEK);
-                if (peek_len <= 0)
+                // 1. 패킷 타입 2바이트를 먼저 '확실하게' 꺼내 읽습니다.
+                int type_len = recv_all(client_sock, (char *)&packet_type, sizeof(int16_t));
+                if (type_len <= 0)
                     break;
 
-                int target_size = sizeof(FilePacket);
+                packet->type = packet_type;
+                int target_size = sizeof(FilePacket); // 기본값
 
                 if (packet_type == PKT_REQ_LOGIN || packet_type == PKT_REQ_REGISTER)
                 {
@@ -118,8 +120,8 @@ int main()
                 {
                     target_size = sizeof(BlacklistReqPacket);
                 }
-
-                int recv_len = recv_all(client_sock, (char *)packet, target_size);
+                int rest_size = target_size - sizeof(int16_t);
+                int recv_len = recv_all(client_sock, ((char *)packet) + sizeof(int16_t), rest_size);
                 if (recv_len <= 0)
                     break;
 
